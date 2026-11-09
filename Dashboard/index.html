@@ -445,10 +445,9 @@
     <div class="main-content">
         <div class="header-bar">
             <div id="connection-status" class="status-indicator">Connecting to vPilot mirror...</div>
-            <div id="user-callsign" class="callsign-display" onclick="handleCallsignClick()" title="Tap to sync with SimBrief or edit">CALLSIGN</div>
+            <div id="user-callsign" class="callsign-display" onclick="handleCallsignClick()" title="Connected VATSIM Callsign (or tap to edit)">CALLSIGN</div>
             <div class="header-spacer">
                 <button class="sb-btn clear-btn" onclick="clearMessages()">Clear</button>
-                <button class="sb-btn" onclick="syncSimBrief()">Sync SimBrief</button>
             </div>
         </div>
         
@@ -494,69 +493,14 @@
             }
         }
 
-        async function syncSimBrief(silent = false) {
-            let username = localStorage.getItem("simbriefUsername");
-            
-            if (!username || username.trim() === "") {
-                username = prompt("Enter your SimBrief Username or Pilot ID:");
-                if (username && username.trim() !== "") {
-                    localStorage.setItem("simbriefUsername", username.trim());
-                } else {
-                    return;
-                }
-            }
-
-            try {
-                let response = await fetch(`https://www.simbrief.com/api/xml.fetcher.php?username=${encodeURIComponent(username.trim())}&json=1`);
-                let data = await response.json();
-                
-                if (data && data.fetch && data.fetch.status && data.fetch.status.includes("Error")) {
-                    localStorage.removeItem("simbriefUsername"); 
-                    if (!silent) {
-                        alert(`SimBrief Error: ${data.fetch.status}\n\nPlease check your Username/Pilot ID and try syncing again.`);
-                        setTimeout(() => syncSimBrief(false), 500);
-                    }
-                    return;
-                }
-                
-                let cs = null;
-
-                if (data && data.atc && data.atc.callsign && data.atc.callsign.trim() !== "") {
-                    cs = data.atc.callsign;
-                } 
-                else if (data && data.general && data.general.atc_callsign && data.general.atc_callsign.trim() !== "") {
-                    cs = data.general.atc_callsign;
-                } 
-                else if (data && data.general && data.general.icao_airline && data.general.flight_number) {
-                    cs = `${data.general.icao_airline}${data.general.flight_number}`;
-                }
-
-                if (cs && cs.trim() !== "") {
-                    let cleanCs = cs.trim().toUpperCase();
-                    document.getElementById("user-callsign").innerText = cleanCs;
-                    localStorage.setItem("vPilotCallsign", cleanCs);
-                    if (!silent) appendMessage("General", `Synced callsign from SimBrief: ${cleanCs}`, "#4daafc");
-                } else if (!silent) {
-                    alert("SimBrief connected successfully, but no active flight plan was found.");
-                }
-            } catch (err) {
-                if (!silent) alert(`Network Error: ${err.message}`);
-            }
-        }
-
         function handleCallsignClick() {
             let current = localStorage.getItem("vPilotCallsign") || "CALLSIGN";
-            let choice = prompt("Enter callsign manually, or type 'SB' to change SimBrief Username/ID:", current);
+            let choice = prompt("Enter callsign manually:", current);
             
-            if (choice) {
-                if (choice.trim().toUpperCase() === "SB") {
-                    localStorage.removeItem("simbriefUsername");
-                    syncSimBrief();
-                } else if (choice.trim() !== "") {
-                    let cleanCallsign = choice.trim().toUpperCase();
-                    document.getElementById("user-callsign").innerText = cleanCallsign;
-                    localStorage.setItem("vPilotCallsign", cleanCallsign);
-                }
+            if (choice && choice.trim() !== "") {
+                let cleanCallsign = choice.trim().toUpperCase();
+                document.getElementById("user-callsign").innerText = cleanCallsign;
+                localStorage.setItem("vPilotCallsign", cleanCallsign);
             }
         }
 
