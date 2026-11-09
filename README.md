@@ -1,6 +1,6 @@
 # vPilot Tablet Dashboard
 
-A lightweight, responsive web dashboard and companion mirror for [vPilot](https://vpilot.rosscarlson.dev/) (VATSIM pilot client). View controllers in range, monitor active COM1 and COM2 frequencies, read and send text messages, and check ATIS directly from an iPad, Android tablet, phone, or secondary screen.
+A lightweight, responsive web dashboard and companion mirror for [vPilot](https://vpilot.rosscarlson.dev/) (VATSIM pilot client). View controllers in range and monitor active COM1 and COM2 frequencies in real time.
 
 <p align="center">
   <img src="screenshots/preview.jpg" alt="vPilot Tablet Dashboard Preview" width="850">
@@ -67,6 +67,9 @@ To view the dashboard from your tablet or another device on your local Wi-Fi:
    IPv4 Address. . . . . . . . . . . : 192.168.1.50
    ```
    *(Your address will typically begin with `192.168.x.x` or `10.0.x.x`)*.
+
+> **Tip: Using a Fixed / Static IP Works Better**  
+> Assigning a fixed (static) local IP address to your flight simulator PC (or configuring a DHCP reservation in your home router) is strongly recommended. That way, your PC's IP address will never change, and you can save a bookmark or shortcut on your tablet without ever having to look up the IP address again.
 
 ---
 
