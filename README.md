@@ -2,6 +2,10 @@
 
 A lightweight, responsive web dashboard and companion mirror for [vPilot](https://vpilot.rosscarlson.dev/) (VATSIM pilot client). View controllers in range, monitor active COM1 and COM2 frequencies, read and send text messages, and check ATIS directly from an iPad, Android tablet, phone, or secondary screen.
 
+<p align="center">
+  <img src="screenshots/preview.jpg" alt="vPilot Tablet Dashboard Preview" width="850">
+</p>
+
 ---
 
 ## ✨ Features
@@ -18,6 +22,8 @@ A lightweight, responsive web dashboard and companion mirror for [vPilot](https:
 
 ```
 vPilot-Tablet-Dashboard/
+├── screenshots/
+│   └── preview.jpg             # Tablet dashboard preview
 ├── Dashboard/
 │   ├── index.html              # Responsive web dashboard
 │   └── Launch_Dashboard.bat    # Standalone server launcher (Python http.server)
