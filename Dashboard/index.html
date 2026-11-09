@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>vPilot Tablet Mirror</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: Arial, sans-serif;
+            padding: 12px;
+            display: flex;
+            gap: 12px;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 320px;
+            min-width: 300px;
+            max-width: 340px;
+            height: 100%;
+            background: #1e1e1e;
+            padding: 12px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .main-content {
+            flex: 1 1 0;
+            min-width: 0;
+            height: 100%;
+            background: #1e1e1e;
+            padding: 12px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .radio-container {
+            flex-shrink: 0;
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .radio-box {
+            background: #2a2a2a;
+            padding: 10px 8px;
+            border-radius: 6px;
+            text-align: center;
+            flex: 1;
+            border: 1px solid #383838;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .radio-label {
+            font-size: 12px;
+            color: #aaa;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+        }
+        .freq-display {
+            font-size: 20px;
+            font-weight: bold;
+            color: #4daafc;
+            font-family: monospace;
+            margin-top: 2px;
+            margin-bottom: 8px;
+        }
+
+        .tx-rx-container {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            padding: 0 2px;
+        }
+        .btn-tx-rx {
+            flex: 1;
+            padding: 6px 0;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: bold;
+            font-family: monospace, Arial, sans-serif;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.12s, color 0.12s, border-color 0.12s, box-shadow 0.12s;
+            background: #1e1e1e;
+            color: #555555;
+            border: 1px solid #383838;
+            outline: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        .btn-tx-rx:hover {
+            border-color: #666;
+            color: #aaa;
+        }
+
+        /* LED Indicator Light Dot */
+        .indicator-led {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #2b2b2b;
+            border: 1px solid #444;
+            display: inline-block;
+            transition: all 0.12s ease-in-out;
+            pointer-events: none;
+        }
+
+        /* TX / RX Selected / Armed (Same Blue for COM1 and COM2) */
+        .btn-tx.selected, .btn-rx.selected {
+            background: rgba(77, 170, 252, 0.16) !important;
+            color: #ffffff !important;
+            border-color: #4daafc !important;
+            box-shadow: 0 0 6px rgba(77, 170, 252, 0.4) !important;
+        }
+        .btn-tx.selected .indicator-led, .btn-rx.selected .indicator-led {
+            background: #4daafc !important;
+            border-color: #4daafc !important;
+            box-shadow: 0 0 6px #4daafc !important;
+        }
+
+        /* TX Active Transmitting (Authentic vPilot Illuminated Cyan Light #00c0c0) */
+        .btn-tx.active-tx {
+            background: #00c0c0 !important;
+            color: #000000 !important;
+            border-color: #00ffff !important;
+            box-shadow: 0 0 14px rgba(0, 255, 255, 0.95), inset 0 0 4px rgba(255, 255, 255, 0.6) !important;
+        }
+        .btn-tx.active-tx .indicator-led {
+            background: #ffffff !important;
+            border-color: #ffffff !important;
+            box-shadow: 0 0 8px #ffffff !important;
+        }
+
+        /* RX Active Receiving (Authentic vPilot Illuminated Cyan Light #00c0c0) */
+        .btn-rx.active-rx {
+            background: #00c0c0 !important;
+            color: #000000 !important;
+            border-color: #00ffff !important;
+            box-shadow: 0 0 14px rgba(0, 255, 255, 0.95), inset 0 0 4px rgba(255, 255, 255, 0.6) !important;
+        }
+        .btn-rx.active-rx .indicator-led {
+            background: #ffffff !important;
+            border-color: #ffffff !important;
+            box-shadow: 0 0 8px #ffffff !important;
+        }
+
+        .ptt-container {
+            flex-shrink: 0;
+            margin-bottom: 12px;
+        }
+        .ptt-btn {
+            width: 100%;
+            background: #262626;
+            border: 1px solid #444;
+            color: #aaa;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            user-select: none;
+            touch-action: manipulation;
+            transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+        }
+        .ptt-btn:hover {
+            background: #333;
+            color: #fff;
+            border-color: #666;
+        }
+        .ptt-btn.transmitting {
+            background: #00c0c0 !important;
+            color: #000000 !important;
+            border-color: #00ffff !important;
+            box-shadow: 0 0 14px rgba(0, 255, 255, 0.95) !important;
+        }
+
+        #controllers-container {
+            flex: 1 1 0;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            background: #181818;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 10px;
+            overflow: hidden;
+        }
+        .controllers-header {
+            flex-shrink: 0;
+            font-size: 15px;
+            font-weight: bold;
+            color: #ffffff;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #333;
+        }
+        #controllers-list {
+            flex: 1 1 0;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            padding-right: 4px;
+        }
+
+        #controllers-list::-webkit-scrollbar,
+        .chat-pane::-webkit-scrollbar,
+        .tab-bar::-webkit-scrollbar {
+            width: 6px;
+            height: 4px;
+        }
+        #controllers-list::-webkit-scrollbar-track,
+        .chat-pane::-webkit-scrollbar-track,
+        .tab-bar::-webkit-scrollbar-track {
+            background: #181818;
+            border-radius: 3px;
+        }
+        #controllers-list::-webkit-scrollbar-thumb,
+        .chat-pane::-webkit-scrollbar-thumb,
+        .tab-bar::-webkit-scrollbar-thumb {
+            background: #383838;
+            border-radius: 3px;
+        }
+        #controllers-list::-webkit-scrollbar-thumb:hover,
+        .chat-pane::-webkit-scrollbar-thumb:hover,
+        .tab-bar::-webkit-scrollbar-thumb:hover {
+            background: #4daafc;
+        }
+        
+        .controller-group-header {
+            color: #00ffff;
+            font-size: 15px;
+            margin-top: 12px;
+            margin-bottom: 2px;
+            padding-left: 2px;
+        }
+        .controller-item {
+            padding: 4px 5px 4px 10px;
+            margin: 2px 0;
+            background: transparent;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            transition: background 0.2s;
+        }
+        .controller-item:hover {
+            background: #2a2a2a;
+        }
+        .tree-line {
+            color: #666;
+            margin-right: 6px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .controller-text {
+            color: #ffcca8;
+        }
+
+        .header-bar {
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #333;
+        }
+        .status-indicator {
+            font-size: 12px;
+            color: #888;
+            flex: 1;
+        }
+        .callsign-display {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ffffff;
+            flex: 1;
+            text-align: center;
+            cursor: pointer;
+            letter-spacing: 1px;
+            transition: color 0.2s;
+        }
+        .callsign-display:hover {
+            color: #4daafc;
+        }
+        .header-spacer {
+            flex: 1;
+            display: flex;
+            justify-content: flex-end;
+            gap: 6px;
+        }
+        .sb-btn {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: #aaa;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+        .sb-btn:hover {
+            background: #3a3a3a;
+            color: #4daafc;
+        }
+        .clear-btn:hover {
+            background: #5a2a2a;
+            color: #ff6666;
+            border-color: #ff6666;
+        }
+
+        .tab-bar {
+            flex-shrink: 0;
+            display: flex;
+            gap: 5px;
+            border-bottom: 1px solid #333;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+        .tab {
+            background: #2a2a2a;
+            color: #aaa;
+            padding: 6px 10px;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            border: 1px solid transparent;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.2s, color 0.2s;
+            white-space: nowrap;
+        }
+        .tab:hover {
+            background: #3a3a3a;
+            color: #fff;
+        }
+        .tab.active {
+            background: #181818;
+            color: #4daafc;
+            border-color: #333;
+            border-bottom: 1px solid #181818;
+        }
+        .tab-close {
+            background: transparent;
+            border: none;
+            color: #888;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+        .tab-close:hover {
+            background: #ff3333;
+            color: #fff;
+        }
+        #chat-panes-container {
+            flex: 1 1 0;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-pane {
+            display: none;
+            flex: 1 1 0;
+            min-height: 0;
+            height: 100%;
+            background: #181818;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 10px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            font-family: monospace;
+            font-size: 13px;
+            word-break: break-word;
+        }
+        .chat-pane.active {
+            display: flex;
+            flex-direction: column;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="radio-container">
+            <div class="radio-box" id="radio-box-com1">
+                <div class="radio-label">COM 1</div>
+                <div id="com1-freq" class="freq-display">122.800</div>
+                <div class="tx-rx-container">
+                    <button type="button" id="com1-tx" class="btn-tx-rx btn-tx selected" onclick="handleTxClick(1)" title="COM 1 Transmit (Click to select)"><span class="indicator-led"></span>TX</button>
+                    <button type="button" id="com1-rx" class="btn-tx-rx btn-rx selected" onclick="handleRxClick(1)" title="COM 1 Receive (Click to toggle)"><span class="indicator-led"></span>RX</button>
+                </div>
+            </div>
+            <div class="radio-box" id="radio-box-com2">
+                <div class="radio-label">COM 2</div>
+                <div id="com2-freq" class="freq-display">121.500</div>
+                <div class="tx-rx-container">
+                    <button type="button" id="com2-tx" class="btn-tx-rx btn-tx" onclick="handleTxClick(2)" title="COM 2 Transmit (Click to select)"><span class="indicator-led"></span>TX</button>
+                    <button type="button" id="com2-rx" class="btn-tx-rx btn-rx selected" onclick="handleRxClick(2)" title="COM 2 Receive (Click to toggle)"><span class="indicator-led"></span>RX</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="ptt-container">
+            <button type="button" id="ptt-btn" class="ptt-btn" title="Press & Hold to Transmit">PTT (Push to Talk)</button>
+        </div>
+
+        <div id="controllers-container">
+            <div class="controllers-header">Controllers In Range</div>
+            <div id="controllers-list">
+                <div style="color: #888; font-style: italic; font-size: 13px;">Scanning...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="header-bar">
+            <div id="connection-status" class="status-indicator">Connecting to vPilot mirror...</div>
+            <div id="user-callsign" class="callsign-display" onclick="handleCallsignClick()" title="Tap to sync with SimBrief or edit">CALLSIGN</div>
+            <div class="header-spacer">
+                <button class="sb-btn clear-btn" onclick="clearMessages()">Clear</button>
+                <button class="sb-btn" onclick="syncSimBrief()">Sync SimBrief</button>
+            </div>
+        </div>
+        
+        <div class="tab-bar" id="tab-bar">
+            <div class="tab active" id="tab-General" onclick="switchTab('General')">
+                <span>General / ATIS</span>
+            </div>
+        </div>
+
+        <div id="chat-panes-container">
+            <div id="pane-General" class="chat-pane active"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let activeTab = 'General';
+        
+        document.addEventListener("DOMContentLoaded", () => {
+            let savedCallsign = localStorage.getItem("vPilotCallsign");
+            if (savedCallsign && savedCallsign.trim() !== "" && savedCallsign.trim().toUpperCase() !== "CALLSIGN") {
+                document.getElementById("user-callsign").innerText = savedCallsign.trim().toUpperCase();
+            }
+            setupPttButton();
+        });
+
+        function applyCallsign(cs) {
+            if (!cs || cs.trim() === "" || cs.trim().toUpperCase() === "CALLSIGN") return;
+            const cleanCs = cs.trim().toUpperCase();
+            const currentEl = document.getElementById("user-callsign");
+            const current = currentEl ? currentEl.innerText.trim().toUpperCase() : "";
+            if (cleanCs !== current) {
+                if (currentEl) currentEl.innerText = cleanCs;
+                localStorage.setItem("vPilotCallsign", cleanCs);
+                appendMessage("General", `Connected with vPilot callsign: ${cleanCs}`, "#4daafc");
+            }
+        }
+
+        function clearMessages() {
+            document.querySelectorAll('.chat-pane').forEach(p => p.innerHTML = '');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "clear_history" }));
+            }
+        }
+
+        async function syncSimBrief(silent = false) {
+            let username = localStorage.getItem("simbriefUsername");
+            
+            if (!username || username.trim() === "") {
+                username = prompt("Enter your SimBrief Username or Pilot ID:");
+                if (username && username.trim() !== "") {
+                    localStorage.setItem("simbriefUsername", username.trim());
+                } else {
+                    return;
+                }
+            }
+
+            try {
+                let response = await fetch(`https://www.simbrief.com/api/xml.fetcher.php?username=${encodeURIComponent(username.trim())}&json=1`);
+                let data = await response.json();
+                
+                if (data && data.fetch && data.fetch.status && data.fetch.status.includes("Error")) {
+                    localStorage.removeItem("simbriefUsername"); 
+                    if (!silent) {
+                        alert(`SimBrief Error: ${data.fetch.status}\n\nPlease check your Username/Pilot ID and try syncing again.`);
+                        setTimeout(() => syncSimBrief(false), 500);
+                    }
+                    return;
+                }
+                
+                let cs = null;
+
+                if (data && data.atc && data.atc.callsign && data.atc.callsign.trim() !== "") {
+                    cs = data.atc.callsign;
+                } 
+                else if (data && data.general && data.general.atc_callsign && data.general.atc_callsign.trim() !== "") {
+                    cs = data.general.atc_callsign;
+                } 
+                else if (data && data.general && data.general.icao_airline && data.general.flight_number) {
+                    cs = `${data.general.icao_airline}${data.general.flight_number}`;
+                }
+
+                if (cs && cs.trim() !== "") {
+                    let cleanCs = cs.trim().toUpperCase();
+                    document.getElementById("user-callsign").innerText = cleanCs;
+                    localStorage.setItem("vPilotCallsign", cleanCs);
+                    if (!silent) appendMessage("General", `Synced callsign from SimBrief: ${cleanCs}`, "#4daafc");
+                } else if (!silent) {
+                    alert("SimBrief connected successfully, but no active flight plan was found.");
+                }
+            } catch (err) {
+                if (!silent) alert(`Network Error: ${err.message}`);
+            }
+        }
+
+        function handleCallsignClick() {
+            let current = localStorage.getItem("vPilotCallsign") || "CALLSIGN";
+            let choice = prompt("Enter callsign manually, or type 'SB' to change SimBrief Username/ID:", current);
+            
+            if (choice) {
+                if (choice.trim().toUpperCase() === "SB") {
+                    localStorage.removeItem("simbriefUsername");
+                    syncSimBrief();
+                } else if (choice.trim() !== "") {
+                    let cleanCallsign = choice.trim().toUpperCase();
+                    document.getElementById("user-callsign").innerText = cleanCallsign;
+                    localStorage.setItem("vPilotCallsign", cleanCallsign);
+                }
+            }
+        }
+
+        function connect() {
+            // Dynamically connects using the PC IP address from the tablet browser URL
+            ws = new WebSocket("ws://" + window.location.hostname + ":9090");
+
+            ws.onopen = () => {
+                document.getElementById("connection-status").innerText = "Connected to vPilot.";
+                document.getElementById("connection-status").style.color = "#4bb543";
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ Action: "get_state" }));
+                }
+            };
+
+            ws.onclose = () => {
+                document.getElementById("connection-status").innerText = "Disconnected. Reconnecting...";
+                document.getElementById("connection-status").style.color = "#ff3333";
+                setTimeout(connect, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error("WebSocket Error: ", error);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.Type === "Radios") {
+                    if (data.Com1) document.getElementById("com1-freq").innerText = data.Com1;
+                    if (data.Com2) document.getElementById("com2-freq").innerText = data.Com2;
+                    if (data.Callsign) applyCallsign(data.Callsign);
+                    updateRadioButtons(data);
+                }
+                else if (data.Type === "Callsign") {
+                    if (data.Callsign) applyCallsign(data.Callsign);
+                }
+                else if (data.Type === "Controllers") {
+                    updateControllersList(data.List);
+                } 
+                else if (data.Type === "PrivateMessage") {
+                    handlePrivateMessage(data.Sender, data.Message, data.TimeStr);
+                }
+                else if (data.Type === "RadioTextMessage") {
+                    let freqStr = data.Frequency ? ` on ${data.Frequency}` : "";
+                    let senderStr = data.Sender || "Unknown";
+                    let timeStr = data.TimeStr || "";
+                    appendMessage("General", `${timeStr} ${senderStr}${freqStr}: ${data.Message}`, "#e0e0e0");
+                }
+                else if (data.Type === "MessageHistory") {
+                    document.querySelectorAll('.chat-pane').forEach(p => p.innerHTML = '');
+                    
+                    data.Messages.forEach(msg => {
+                        if (msg.Type === "RadioTextMessage") {
+                            let freqStr = msg.Frequency ? ` on ${msg.Frequency}` : "";
+                            let senderStr = msg.Sender || "Unknown";
+                            let timeStr = msg.TimeStr || "";
+                            appendMessage("General", `${timeStr} ${senderStr}${freqStr}: ${msg.Message}`, "#e0e0e0");
+                        } else if (msg.Type === "PrivateMessage") {
+                            handlePrivateMessage(msg.Sender, msg.Message, msg.TimeStr);
+                        }
+                    });
+                }
+                else if (data.Type === "ClearHistory") {
+                    document.querySelectorAll('.chat-pane').forEach(p => p.innerHTML = '');
+                }
+            };
+        }
+
+        function updateRadioButtons(data) {
+            // COM 1 TX
+            const com1Tx = document.getElementById("com1-tx");
+            if (com1Tx && data.Com1Tx !== undefined) {
+                com1Tx.classList.toggle("selected", !!data.Com1Tx);
+                com1Tx.classList.toggle("active-tx", !!data.Com1TxActive);
+            }
+
+            // COM 1 RX
+            const com1Rx = document.getElementById("com1-rx");
+            if (com1Rx && data.Com1Rx !== undefined) {
+                com1Rx.classList.toggle("selected", !!data.Com1Rx);
+                const isCom1Rx = !!data.Com1RxActive || (!!data.RxActive && !data.Com2RxActive && !!data.Com1Rx);
+                com1Rx.classList.toggle("active-rx", isCom1Rx);
+            }
+
+            // COM 2 TX
+            const com2Tx = document.getElementById("com2-tx");
+            if (com2Tx && data.Com2Tx !== undefined) {
+                com2Tx.classList.toggle("selected", !!data.Com2Tx);
+                com2Tx.classList.toggle("active-tx", !!data.Com2TxActive);
+            }
+
+            // COM 2 RX
+            const com2Rx = document.getElementById("com2-rx");
+            if (com2Rx && data.Com2Rx !== undefined) {
+                com2Rx.classList.toggle("selected", !!data.Com2Rx);
+                const isCom2Rx = !!data.Com2RxActive || (!!data.RxActive && !data.Com1RxActive && !!data.Com2Rx);
+                com2Rx.classList.toggle("active-rx", isCom2Rx);
+            }
+
+            // PTT indicator
+            const pttBtn = document.getElementById("ptt-btn");
+            if (pttBtn) {
+                pttBtn.classList.toggle("transmitting", !!(data.Com1TxActive || data.Com2TxActive || data.TxActive));
+            }
+        }
+
+        function handleTxClick(radioIndex) {
+            if (radioIndex === 1) {
+                document.getElementById("com1-tx")?.classList.add("selected");
+                document.getElementById("com2-tx")?.classList.remove("selected");
+            } else if (radioIndex === 2) {
+                document.getElementById("com2-tx")?.classList.add("selected");
+                document.getElementById("com1-tx")?.classList.remove("selected");
+            }
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "set_active_com", Radio: radioIndex }));
+            }
+        }
+
+        function handleRxClick(radioIndex) {
+            if (radioIndex === 1) {
+                document.getElementById("com1-rx")?.classList.toggle("selected");
+            } else if (radioIndex === 2) {
+                document.getElementById("com2-rx")?.classList.toggle("selected");
+            }
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "toggle_rx", Radio: radioIndex }));
+            }
+        }
+
+        function setupPttButton() {
+            const pttBtn = document.getElementById("ptt-btn");
+            if (!pttBtn) return;
+
+            const startPtt = (e) => {
+                e.preventDefault();
+                pttBtn.classList.add("transmitting");
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ Action: "set_ptt", Pressed: true }));
+                }
+            };
+
+            const stopPtt = (e) => {
+                e.preventDefault();
+                pttBtn.classList.remove("transmitting");
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ Action: "set_ptt", Pressed: false }));
+                }
+            };
+
+            pttBtn.addEventListener("mousedown", startPtt);
+            pttBtn.addEventListener("mouseup", stopPtt);
+            pttBtn.addEventListener("mouseleave", stopPtt);
+            pttBtn.addEventListener("touchstart", startPtt, { passive: false });
+            pttBtn.addEventListener("touchend", stopPtt, { passive: false });
+            pttBtn.addEventListener("touchcancel", stopPtt, { passive: false });
+        }
+
+        function appendMessage(tabName, text, color) {
+            let pane = document.getElementById(`pane-${tabName}`);
+            if (!pane) {
+                createTab(tabName);
+                pane = document.getElementById(`pane-${tabName}`);
+            }
+            const msgDiv = document.createElement("div");
+            msgDiv.style.color = color || "#e0e0e0";
+            msgDiv.innerText = text;
+            pane.appendChild(msgDiv);
+            pane.scrollTop = pane.scrollHeight;
+        }
+
+        function createTab(tabName) {
+            if (document.getElementById(`tab-${tabName}`)) return;
+
+            const tabBar = document.getElementById("tab-bar");
+            const tabBtn = document.createElement("div");
+            tabBtn.className = "tab";
+            tabBtn.id = `tab-${tabName}`;
+            
+            const titleSpan = document.createElement("span");
+            titleSpan.innerText = tabName;
+            titleSpan.onclick = () => switchTab(tabName);
+            tabBtn.appendChild(titleSpan);
+
+            if (tabName !== 'General') {
+                const closeBtn = document.createElement("button");
+                closeBtn.className = "tab-close";
+                closeBtn.innerText = "✕";
+                closeBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    closeTab(tabName);
+                };
+                tabBtn.appendChild(closeBtn);
+            }
+
+            tabBar.appendChild(tabBtn);
+
+            const panesContainer = document.getElementById("chat-panes-container");
+            const paneDiv = document.createElement("div");
+            paneDiv.className = "chat-pane";
+            paneDiv.id = `pane-${tabName}`;
+            panesContainer.appendChild(paneDiv);
+        }
+
+        function closeTab(tabName) {
+            const tabElem = document.getElementById(`tab-${tabName}`);
+            const paneElem = document.getElementById(`pane-${tabName}`);
+
+            if (tabElem) tabElem.remove();
+            if (paneElem) paneElem.remove();
+
+            if (activeTab === tabName) {
+                switchTab('General');
+            }
+        }
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.chat-pane').forEach(p => p.classList.remove('active'));
+
+            const targetTab = document.getElementById(`tab-${tabName}`);
+            const targetPane = document.getElementById(`pane-${tabName}`);
+
+            if (targetTab) targetTab.classList.add('active');
+            if (targetPane) targetPane.classList.add('active');
+            activeTab = tabName;
+        }
+
+        function handlePrivateMessage(sender, message, timeStr) {
+            createTab(sender);
+            let prefix = timeStr ? `${timeStr} ` : "";
+            appendMessage(sender, `${prefix}[PM from ${sender}] ${message}`, "#4daafc");
+        }
+
+        function updateControllersList(list) {
+            const listEl = document.getElementById('controllers-list');
+            if (!listEl) return;
+            listEl.innerHTML = '';
+
+            if (!list || list.length === 0) {
+                listEl.innerHTML = '<div style="color: #888; font-style: italic; font-size: 13px;">No controllers in range</div>';
+                return;
+            }
+
+            const groups = {
+                "Center": [],
+                "Approach/Departure": [],
+                "Tower": [],
+                "Ground": [],
+                "Ramp": [],
+                "Clearance Delivery": [],
+                "ATIS": [],
+                "Observers": [],
+                "Other": []
+            };
+
+            list.forEach(c => {
+                const cs = c.Callsign.toUpperCase();
+                if (cs.endsWith("CTR") || cs.endsWith("FSS")) groups["Center"].push(c);
+                else if (cs.endsWith("APP") || cs.endsWith("DEP")) groups["Approach/Departure"].push(c);
+                else if (cs.endsWith("TWR")) groups["Tower"].push(c);
+                else if (cs.endsWith("GND")) groups["Ground"].push(c);
+                else if (cs.endsWith("RMP") || cs.endsWith("RAMP")) groups["Ramp"].push(c);
+                else if (cs.endsWith("DEL")) groups["Clearance Delivery"].push(c);
+                else if (cs.endsWith("ATIS")) groups["ATIS"].push(c);
+                else if (cs.endsWith("OBS")) groups["Observers"].push(c);
+                else groups["Other"].push(c);
+            });
+
+            for (const [groupName, controllers] of Object.entries(groups)) {
+                if (controllers.length > 0) {
+                    const header = document.createElement('div');
+                    header.className = 'controller-group-header';
+                    header.innerText = groupName;
+                    listEl.appendChild(header);
+
+                    controllers.forEach(c => {
+                        const item = document.createElement('div');
+                        item.className = 'controller-item';
+                        
+                        item.innerHTML = `
+                            <span class="tree-line">└─</span>
+                            <span class="controller-text">${c.Callsign} - ${c.Frequency}</span>
+                        `;
+                        
+                        item.onclick = () => {
+                            let d = new Date();
+                            let timeStr = `[${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}]`;
+                            appendMessage("General", `${timeStr} Requesting ATIS for ${c.Callsign}.`, "#ffd700");
+                            appendMessage("General", `${c.Callsign} ATIS:`, "#4bb543");
+                            if (c.Atis && c.Atis.length > 0) {
+                                c.Atis.forEach(line => appendMessage("General", line, "#4bb543"));
+                            } else {
+                                appendMessage("General", `No ATIS text available for ${c.Callsign}`, "#888");
+                            }
+                        };
+                        
+                        listEl.appendChild(item);
+                    });
+                }
+            }
+        }
+
+        document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") {
+                if (!ws || ws.readyState === WebSocket.CLOSED) {
+                    document.getElementById("connection-status").innerText = "Waking up and reconnecting...";
+                    document.getElementById("connection-status").style.color = "#ffd700";
+                    connect();
+                }
+            }
+        });
+
+        connect();
+    </script>
+</body>
+</html>
