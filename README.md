@@ -1,6 +1,6 @@
 # vPilot Tablet Dashboard
 
-A lightweight, responsive web dashboard and companion mirror for [vPilot](https://vpilot.rosscarlson.dev/) (VATSIM pilot client). View controllers in range and monitor active COM1 and COM2 frequencies in real time.
+A lightweight, responsive web dashboard and companion mirror for [vPilot](https://vpilot.rosscarlson.dev/) (VATSIM pilot client). View controllers in range and monitor active COM1 and COM2 frequencies in real time — on any iPad, Android tablet, phone, or directly inside your aircraft's Virtual EFB.
 
 <p align="center">
   <img src="screenshots/dashboard-preview.jpg" alt="vPilot Tablet Dashboard Preview" width="850">
@@ -73,16 +73,22 @@ To view the dashboard from your tablet or another device on your local Wi-Fi:
 
 ---
 
-### Step 3: Connect Your Tablet
+### Step 3: Connect Your Tablet or Virtual EFB
 
 1. Start **vPilot**. The plugin will automatically initialize the WebSocket server (port `9090`) and launch the dashboard web server (port `8085`).
-2. On your tablet, smartphone, or secondary computer connected to the same Wi-Fi network, open any browser (Safari, Chrome, Edge, Firefox).
-3. In the address bar, type:
-   ```
-   http://<YOUR-PC-IP>:8085
-   ```
-   *Example: `http://192.168.1.50:8085`*
-4. The dashboard will load and automatically connect to your simulator session.
+2. Open your preferred device or browser:
+   - **In an Aircraft Virtual EFB or Simulator PC Browser:**  
+     Navigate to:
+     ```
+     http://localhost:8085
+     ```
+   - **On a Physical iPad, Tablet, or Phone (Same Wi-Fi):**  
+     Navigate to:
+     ```
+     http://<YOUR-PC-IP>:8085
+     ```
+     *Example: `http://192.168.1.50:8085`*
+3. The dashboard will load and automatically connect to your simulator session.
 
 ---
 
