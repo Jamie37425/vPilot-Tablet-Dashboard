@@ -3,7 +3,7 @@
 A lightweight, responsive web dashboard and companion mirror for [vPilot](https://vpilot.rosscarlson.dev/) (VATSIM pilot client). View controllers in range and monitor active COM1 and COM2 frequencies in real time.
 
 <p align="center">
-  <img src="screenshots/preview.jpg" alt="vPilot Tablet Dashboard Preview" width="850">
+  <img src="screenshots/dashboard-preview.jpg" alt="vPilot Tablet Dashboard Preview" width="850">
 </p>
 
 ---
@@ -23,7 +23,7 @@ A lightweight, responsive web dashboard and companion mirror for [vPilot](https:
 ```
 vPilot-Tablet-Dashboard/
 ├── screenshots/
-│   └── preview.jpg             # Tablet dashboard preview
+│   └── dashboard-preview.jpg   # Tablet dashboard preview
 ├── Dashboard/
 │   ├── index.html              # Responsive web dashboard
 │   └── Launch_Dashboard.bat    # Standalone server launcher (Python http.server)
