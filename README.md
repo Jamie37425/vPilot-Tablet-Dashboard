@@ -1,6 +1,6 @@
 # vPilot Tablet Dashboard
 
-A lightweight, responsive web dashboard and companion mirror for [vPilot](https://vpilot.rosscarlson.dev/) (VATSIM pilot client). View controllers in range and monitor active COM1 and COM2 frequencies in real time — on any iPad, Android tablet, phone, or directly inside your aircraft's Virtual EFB.
+A lightweight, responsive web dashboard and companion mirror for [vPilot](https://vpilot.rosscarlson.dev/) (VATSIM pilot client). View controllers in range and monitor active COM1 and COM2 frequencies in real time — on any iPad, Android tablet, phone, or directly inside [Virtual EFB](https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph).
 
 <p align="center">
   <img src="screenshots/dashboard-preview.jpg" alt="vPilot Tablet Dashboard Preview" width="850">
@@ -11,6 +11,7 @@ A lightweight, responsive web dashboard and companion mirror for [vPilot](https:
 ## ✨ Features
 
 - **Realistic COM1 & COM2 RX/TX Indicators**: Live indicators styled identically to the real vPilot client (`#00a2ff`). The TX light illuminates on your active transmit radio when you press your Push-To-Talk (PTT) key, and the RX light indicates incoming audio.
+- **In-Cockpit & Virtual EFB Compatible**: Seamlessly integrates into [Virtual EFB](https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph) or in-cockpit web browser tablets using `http://localhost:8085`.
 - **Automatic Callsign Sync**: Automatically synchronizes your active callsign straight from vPilot once connected to the VATSIM network — no manual SimBrief Pilot ID or callsign entry required.
 - **Independent Scrolling Panels**: The controller list and chat/message tabs scroll separately while keeping the top radio header and callsign fixed in view.
 - **Silent Background Server Management**: When vPilot starts, the plugin automatically launches the local web server silently in the background and closes it cleanly when vPilot exits.
@@ -77,7 +78,7 @@ To view the dashboard from your tablet or another device on your local Wi-Fi:
 
 1. Start **vPilot**. The plugin will automatically initialize the WebSocket server (port `9090`) and launch the dashboard web server (port `8085`).
 2. Open your preferred device or browser:
-   - **In an Aircraft Virtual EFB or Simulator PC Browser:**  
+   - **Inside [Virtual EFB](https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph) or Simulator PC Browser:**  
      Navigate to:
      ```
      http://localhost:8085
