@@ -14,7 +14,7 @@ A lightweight, responsive web dashboard and companion mirror for [vPilot](https:
 - **In-Cockpit & Virtual EFB Compatible**: Seamlessly integrates into [Virtual EFB](https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph) or in-cockpit web browser tablets using `http://localhost:8085`.
 - **Automatic Callsign Sync**: Automatically synchronizes your active callsign straight from vPilot once connected to the VATSIM network — no manual SimBrief Pilot ID or callsign entry required.
 - **Independent Scrolling Panels**: The controller list and chat/message tabs scroll separately while keeping the top radio header and callsign fixed in view.
-- **Silent Background Server Management**: When vPilot starts, the plugin automatically launches the local web server silently in the background and closes it cleanly when vPilot exits.
+- **Silent Built-in Web Server (Zero Dependencies)**: When vPilot starts, the plugin serves the dashboard directly on port `8085` and WebSockets on port `9090` with zero external tools (no Python required), and closes cleanly when vPilot exits.
 - **Zero Configuration IP Handling**: The dashboard automatically detects your PC's IP address dynamically using `window.location.hostname`. No configuration files or manual IP edits required.
 
 ---
@@ -23,13 +23,14 @@ A lightweight, responsive web dashboard and companion mirror for [vPilot](https:
 
 ```
 vPilot-Tablet-Dashboard/
+├── Install.bat                 # 1-Click Installer (unblocks DLLs & installs to vPilot)
 ├── screenshots/
 │   └── dashboard-preview.jpg   # Tablet dashboard preview
 ├── Dashboard/
 │   ├── index.html              # Responsive web dashboard
-│   └── Launch_Dashboard.bat    # Standalone server launcher (Python http.server)
+│   └── Launch_Dashboard.bat    # Optional standalone launcher (without vPilot)
 ├── Plugin/
-│   ├── vPilotTabletMirror.dll  # Pre-compiled vPilot companion plugin
+│   ├── vPilotTabletMirror.dll  # Pre-compiled vPilot companion plugin (includes built-in UI)
 │   ├── Fleck.dll               # WebSocket server dependency
 │   └── Newtonsoft.Json.dll     # JSON serialization dependency
 └── Source/
@@ -41,7 +42,19 @@ vPilot-Tablet-Dashboard/
 
 ## 🚀 Quick Start & Installation
 
-### Step 1: Install the vPilot Plugin
+### Option A: 1-Click Install (Recommended)
+
+1. Extract the entire downloaded ZIP archive to any folder (e.g. `Documents`).
+2. Double-click **`Install.bat`** inside the extracted folder.
+   - *(If Windows Defender SmartScreen appears, click **More info** → **Run anyway**)*.
+   - `Install.bat` automatically **unblocks Windows security locks**, installs all plugin DLLs into `%LOCALAPPDATA%\vPilot\Plugins`, configures the dashboard path, and shows your exact connection URL.
+
+---
+
+### Option B: Manual Installation
+
+> [!IMPORTANT]
+> **Windows Security Block Notice:** Whenever you download `.dll` files from the internet (e.g. Flightsim.to), Windows blocks them with *"Mark of the Web"*. Before extracting or copying manually, **right-click the downloaded `.zip` (or each `.dll`) → Properties → check "Unblock" → Apply → OK**, otherwise vPilot will be blocked from loading the plugin!
 
 1. Close vPilot if it is currently running.
 2. Open Windows File Explorer and navigate to your vPilot plugins folder:
@@ -49,11 +62,11 @@ vPilot-Tablet-Dashboard/
    %LOCALAPPDATA%\vPilot\Plugins
    ```
    *(Paste the path above into the File Explorer address bar and press **Enter** — it resolves to `C:\Users\<YourUsername>\AppData\Local\vPilot\Plugins`)*.
-3. Copy all files from the `Plugin/` directory into this folder:
+3. Copy all files from the `Plugin/` directory into this folder (make sure each DLL is **Unblocked**):
    - `vPilotTabletMirror.dll`
    - `Fleck.dll`
    - `Newtonsoft.Json.dll`
-4. *(Optional)* If you keep this repository outside your `Documents` folder, you can create a text file named `dashboard_path.txt` inside `%LOCALAPPDATA%\vPilot\Plugins\` containing the full path to your `Dashboard` directory (e.g. `C:\vPilot-Tablet-Dashboard\Dashboard`). By default, the plugin automatically looks in standard locations like `Documents\vPilot-Tablet-Dashboard\Dashboard`.
+4. *(Optional)* If you keep the `Dashboard` folder outside your `Documents` folder, you can create a text file named `dashboard_path.txt` inside `%LOCALAPPDATA%\vPilot\Plugins\` containing the full path to your `Dashboard` directory. *(Note: Even without a `Dashboard` folder on disk, the plugin has the dashboard built in as a fallback!).*
 
 ---
 
@@ -95,13 +108,16 @@ To view the dashboard from your tablet or another device on your local Wi-Fi:
 
 ## 🔒 Firewall & Network Troubleshooting
 
-If your tablet shows "Cannot connect" or the page fails to load:
+If your dashboard says **"Connecting to vPilot mirror..."** or your tablet cannot load the page:
 
+- **Stuck on "Connecting to vPilot mirror..."**:
+  - Make sure **vPilot** is running (and wait 10–15 seconds for its initial simulator scan to finish).
+  - If you installed manually without running `Install.bat`, Windows may have blocked the DLLs. Right-click each `.dll` inside `%LOCALAPPDATA%\vPilot\Plugins\` → **Properties** → check **Unblock** → **OK**, then restart vPilot.
 - **Same Network**: Verify that your tablet is connected to the same local Wi-Fi or LAN as your flight simulator PC (not a guest Wi-Fi network with client isolation).
 - **Windows Defender Firewall**:
   1. Open **Windows Security** → **Firewall & network protection**.
   2. Click **Allow an app through firewall**.
-  3. Ensure **Python** and **vPilot** have checkboxes enabled for **Private** networks.
+  3. Ensure **vPilot** has checkboxes enabled for **Private** networks.
   4. Alternatively, add an Inbound Rule in Windows Firewall allowing TCP ports `8085` and `9090`.
 
 ---

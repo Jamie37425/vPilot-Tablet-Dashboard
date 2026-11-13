@@ -4,10 +4,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using RossCarlson.Vatsim.Vpilot.Plugins;
@@ -81,8 +84,9 @@ namespace vPilotTabletMirror
             };
         }
 
-        // Dashboard web server process
-        private Process _dashboardProcess = null;
+        // Built-in Dashboard HTTP server fields
+        private TcpListener _httpServer = null;
+        private CancellationTokenSource _httpCts = null;
 
         public void Initialize(IBroker broker)
         {
@@ -1116,65 +1120,140 @@ namespace vPilotTabletMirror
                     return;
                 }
 
-                string dashboardDir = GetDashboardDirectory();
-                if (string.IsNullOrEmpty(dashboardDir) || !Directory.Exists(dashboardDir))
+                _httpCts = new CancellationTokenSource();
+                _httpServer = new TcpListener(IPAddress.Any, 8085);
+                _httpServer.Start();
+
+                var token = _httpCts.Token;
+                Task.Run(() => RunHttpServerLoop(token), token);
+            }
+            catch (Exception) { }
+        }
+
+        private void RunHttpServerLoop(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
                 {
-                    return;
+                    if (_httpServer == null) break;
+                    TcpClient client = _httpServer.AcceptTcpClient();
+                    Task.Run(() => HandleHttpClient(client));
                 }
-
-                string batPath = Path.Combine(dashboardDir, "Launch_Dashboard.bat");
-                string pythonExe = FindPythonExecutable();
-
-                ProcessStartInfo psi = null;
-
-                if (File.Exists(batPath))
+                catch (SocketException)
                 {
-                    psi = new ProcessStartInfo
+                    if (token.IsCancellationRequested) break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+                catch (Exception) { }
+            }
+        }
+
+        private void HandleHttpClient(TcpClient client)
+        {
+            try
+            {
+                using (client)
+                {
+                    client.ReceiveTimeout = 5000;
+                    client.SendTimeout = 5000;
+
+                    using (NetworkStream stream = client.GetStream())
                     {
-                        FileName = "cmd.exe",
-                        Arguments = "/c \"" + batPath + "\"",
-                        WorkingDirectory = dashboardDir,
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Hidden,
-                        UseShellExecute = false
-                    };
-                }
-                else if (!string.IsNullOrEmpty(pythonExe))
-                {
-                    psi = new ProcessStartInfo
-                    {
-                        FileName = pythonExe,
-                        Arguments = "-m http.server 8085",
-                        WorkingDirectory = dashboardDir,
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Hidden,
-                        UseShellExecute = false
-                    };
-                }
+                        byte[] buffer = new byte[4096];
+                        int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                        if (bytesRead <= 0) return;
 
-                if (psi != null)
-                {
-                    _dashboardProcess = Process.Start(psi);
+                        string request = Encoding.ASCII.GetString(buffer, 0, bytesRead);
+                        string firstLine = request.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)[0];
+
+                        if (firstLine.IndexOf("favicon.ico", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            byte[] notFound = Encoding.ASCII.GetBytes(
+                                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                            stream.Write(notFound, 0, notFound.Length);
+                            return;
+                        }
+
+                        byte[] body = GetDashboardHtmlBytes();
+                        if (body == null || body.Length == 0)
+                        {
+                            byte[] serverError = Encoding.ASCII.GetBytes(
+                                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                            stream.Write(serverError, 0, serverError.Length);
+                            return;
+                        }
+
+                        string headers =
+                            "HTTP/1.1 200 OK\r\n" +
+                            "Content-Type: text/html; charset=utf-8\r\n" +
+                            $"Content-Length: {body.Length}\r\n" +
+                            "Cache-Control: no-cache, no-store, must-revalidate\r\n" +
+                            "Connection: close\r\n\r\n";
+
+                        byte[] headerBytes = Encoding.ASCII.GetBytes(headers);
+                        stream.Write(headerBytes, 0, headerBytes.Length);
+                        stream.Write(body, 0, body.Length);
+                        stream.Flush();
+                    }
                 }
             }
             catch (Exception) { }
         }
 
-        private void StopDashboardServer()
+        private byte[] GetDashboardHtmlBytes()
         {
+            // 1. Prefer external Dashboard/index.html on disk if available
             try
             {
-                if (_dashboardProcess != null && !_dashboardProcess.HasExited)
+                string dashboardDir = GetDashboardDirectory();
+                if (!string.IsNullOrEmpty(dashboardDir))
                 {
-                    _dashboardProcess.Kill();
-                    _dashboardProcess.Dispose();
-                    _dashboardProcess = null;
+                    string htmlPath = Path.Combine(dashboardDir, "index.html");
+                    if (File.Exists(htmlPath))
+                    {
+                        return File.ReadAllBytes(htmlPath);
+                    }
                 }
             }
-            catch { }
+            catch (Exception) { }
 
-            // Ensure any python process listening on port 8085 is closed
-            KillProcessOnPort(8085);
+            // 2. Fallback to embedded index.html inside plugin assembly (zero-dependency fallback)
+            try
+            {
+                Assembly asm = Assembly.GetExecutingAssembly();
+                string resourceName = Array.Find(
+                    asm.GetManifestResourceNames(),
+                    n => n.EndsWith("index.html", StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrEmpty(resourceName))
+                {
+                    using (Stream resStream = asm.GetManifestResourceStream(resourceName))
+                    {
+                        if (resStream != null)
+                        {
+                            using (MemoryStream ms = new MemoryStream())
+                            {
+                                resStream.CopyTo(ms);
+                                return ms.ToArray();
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception) { }
+
+            return null;
+        }
+
+        private void StopDashboardServer()
+        {
+            try { _httpCts?.Cancel(); } catch { }
+            try { _httpServer?.Stop(); } catch { }
+            _httpServer = null;
         }
 
         private string GetDashboardDirectory()
@@ -1197,19 +1276,34 @@ namespace vPilotTabletMirror
                     if (Directory.Exists(localDash)) return localDash;
                 }
 
-                // 3. Check Documents folder
+                // 3. Check Documents folder (including Flightsim.to extracted folders with random suffixes)
                 string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                string[] searchDirs = new[]
+                if (!string.IsNullOrEmpty(docs) && Directory.Exists(docs))
                 {
-                    Path.Combine(docs, "vPilot Dashboard v2"),
-                    Path.Combine(docs, "vPilot-Tablet-Dashboard", "Dashboard"),
-                    Path.Combine(docs, "vPilot Dashboard"),
-                    Path.Combine(docs, "vPilotDashboard")
-                };
+                    string[] searchDirs = new[]
+                    {
+                        Path.Combine(docs, "vPilot Dashboard v2"),
+                        Path.Combine(docs, "vPilot-Tablet-Dashboard", "Dashboard"),
+                        Path.Combine(docs, "vPilot Dashboard"),
+                        Path.Combine(docs, "vPilotDashboard")
+                    };
 
-                foreach (var dir in searchDirs)
-                {
-                    if (Directory.Exists(dir)) return dir;
+                    foreach (var dir in searchDirs)
+                    {
+                        if (Directory.Exists(dir) && File.Exists(Path.Combine(dir, "index.html"))) return dir;
+                    }
+
+                    // Scan any vPilot-Tablet-Dashboard* folder (e.g. vPilot-Tablet-Dashboard-v1.0.0_bHvpm)
+                    try
+                    {
+                        foreach (var dir in Directory.GetDirectories(docs, "vPilot-Tablet-Dashboard*"))
+                        {
+                            string subDash = Path.Combine(dir, "Dashboard");
+                            if (Directory.Exists(subDash) && File.Exists(Path.Combine(subDash, "index.html"))) return subDash;
+                            if (File.Exists(Path.Combine(dir, "index.html"))) return dir;
+                        }
+                    }
+                    catch { }
                 }
 
                 // 4. Check user profile directory
@@ -1217,37 +1311,14 @@ namespace vPilotTabletMirror
                 if (!string.IsNullOrEmpty(userProfile))
                 {
                     string p1 = Path.Combine(userProfile, "Documents", "vPilot-Tablet-Dashboard", "Dashboard");
-                    if (Directory.Exists(p1)) return p1;
+                    if (Directory.Exists(p1) && File.Exists(Path.Combine(p1, "index.html"))) return p1;
                     string p2 = Path.Combine(userProfile, "Documents", "vPilot Dashboard v2");
-                    if (Directory.Exists(p2)) return p2;
+                    if (Directory.Exists(p2) && File.Exists(Path.Combine(p2, "index.html"))) return p2;
                 }
             }
             catch { }
 
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "vPilot-Tablet-Dashboard", "Dashboard");
-        }
-
-        private string FindPythonExecutable()
-        {
-            try
-            {
-                string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                string[] candidates = new[]
-                {
-                    Path.Combine(localApp, @"Microsoft\WindowsApps\py.exe"),
-                    Path.Combine(localApp, @"Programs\Python\Python311\python.exe"),
-                    Path.Combine(localApp, @"Programs\Python\Python312\python.exe"),
-                    Path.Combine(localApp, @"Programs\Python\Python310\python.exe")
-                };
-
-                foreach (var c in candidates)
-                {
-                    if (File.Exists(c)) return c;
-                }
-            }
-            catch { }
-
-            return "py";
+            return null;
         }
 
         private bool IsPortInUse(int port)
@@ -1263,26 +1334,6 @@ namespace vPilotTabletMirror
             }
             catch { }
             return false;
-        }
-
-        private static void KillProcessOnPort(int port)
-        {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c for /f \"tokens=5\" %a in ('netstat -aon ^| findstr :{port} ^| findstr LISTENING') do if %a neq 0 taskkill /f /pid %a",
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                    UseShellExecute = false
-                };
-                using (var p = Process.Start(psi))
-                {
-                    p?.WaitForExit(2000);
-                }
-            }
-            catch { }
         }
 
         #endregion
