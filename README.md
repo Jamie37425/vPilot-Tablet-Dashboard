@@ -49,14 +49,15 @@ vPilot-Tablet-Dashboard/
 1. Extract the entire downloaded ZIP archive to any folder (e.g. `Documents`).
 2. Double-click **`Install.bat`** inside the extracted folder.
    - *(If Windows Defender SmartScreen appears, click **More info** → **Run anyway**)*.
-   - `Install.bat` automatically **unblocks Windows security locks**, installs all plugin DLLs into `%LOCALAPPDATA%\vPilot\Plugins`, configures the dashboard path, and shows your exact connection URL.
+   - `Install.bat` automatically **unblocks Windows security locks**, copies all 3 required DLLs (`vPilotTabletMirror.dll`, `Fleck.dll`, `Newtonsoft.Json.dll`) into `%LOCALAPPDATA%\vPilot\Plugins`, configures the dashboard path, and shows your exact connection URL.
+   - **No manual DLL copying is needed** when you use `Install.bat` — skip straight to **Step 2** below.
 
 ---
 
-### Option B: Manual Installation
+### Option B: Manual Installation *(Skip if you ran `Install.bat`)*
 
 > [!IMPORTANT]
-> **Windows Security Block Notice:** Whenever you download `.dll` files from the internet (e.g. Flightsim.to), Windows blocks them with *"Mark of the Web"*. Before extracting or copying manually, **right-click the downloaded `.zip` (or each `.dll`) → Properties → check "Unblock" → Apply → OK**, otherwise vPilot will be blocked from loading the plugin!
+> **Windows Security Block Notice:** Only follow Option B if you prefer installing manually instead of running `Install.bat`. Whenever you download `.dll` files from the internet (e.g. Flightsim.to), Windows blocks them with *"Mark of the Web"*. Before copying manually, **right-click the downloaded `.zip` (or each `.dll`) → Properties → check "Unblock" → Apply → OK**, otherwise vPilot will be blocked from loading the plugin!
 
 1. Close vPilot if it is currently running.
 2. Open Windows File Explorer and navigate to your vPilot plugins folder:
@@ -105,6 +106,15 @@ To view the dashboard from your tablet or another device on your local Wi-Fi:
      ```
      *Example: `http://192.168.1.50:8085`*
 3. The dashboard will load and automatically connect to your simulator session.
+
+### Using Messaging & Controller Controls
+
+- **Send Radio Text**: On the **General / ATIS** tab, type your message and press **Enter** or tap **Send** to transmit on your active COM TX frequency.
+- **Private Messages**:
+  - Click any controller in **Controllers In Range** to open the **2-button action bar** (**Private Message** | **Request ATIS**). Tapping **Private Message** opens or switches directly to their PM tab.
+  - Or type `.msg CALLSIGN message` (or `.chat CALLSIGN message`) from **General / ATIS** to start a PM tab directly.
+  - Unread incoming PMs display a glowing dot on inactive tabs until opened.
+- **Request ATIS**: Tap **Request ATIS** from a controller's action bar to print their VATSIM ATIS in **General / ATIS**.
 
 ---
 
