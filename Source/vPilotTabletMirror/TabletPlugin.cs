@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -15,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using RossCarlson.Vatsim.Vpilot.Plugins;
 using RossCarlson.Vatsim.Vpilot.Plugins.Events;
+using RossCarlson.Vatsim.Vpilot.Plugins.Exceptions;
 using Fleck;
 using Microsoft.FlightSimulator.SimConnect;
 using Newtonsoft.Json;
@@ -144,7 +144,7 @@ namespace vPilotTabletMirror
 
                 socket.OnMessage = message =>
                 {
-                    HandleWebSocketMessage(message);
+                    HandleWebSocketMessage(message, socket);
                 };
             });
 
@@ -385,7 +385,7 @@ namespace vPilotTabletMirror
             return defaultValue;
         }
 
-        private void HandleWebSocketMessage(string message)
+        private void HandleWebSocketMessage(string message, IWebSocketConnection socket = null)
         {
             try
             {
@@ -441,6 +441,29 @@ namespace vPilotTabletMirror
                         ToggleRx(radio);
                     }
                 }
+                else if (action == "send_radio_message")
+                {
+                    if (command.TryGetValue("Message", out var msgObj))
+                    {
+                        string text = msgObj?.ToString()?.Trim();
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            SendRadioMessageFromDashboard(text, socket);
+                        }
+                    }
+                }
+                else if (action == "send_private_message")
+                {
+                    if (command.TryGetValue("To", out var toObj) && command.TryGetValue("Message", out var msgObj))
+                    {
+                        string to = toObj?.ToString()?.Trim().ToUpper();
+                        string text = msgObj?.ToString()?.Trim();
+                        if (!string.IsNullOrEmpty(to) && !string.IsNullOrEmpty(text))
+                        {
+                            SendPrivateMessageFromDashboard(to, text, socket);
+                        }
+                    }
+                }
                 else if (action == "clear_history")
                 {
                     lock (_messageHistory)
@@ -452,6 +475,104 @@ namespace vPilotTabletMirror
                 }
             }
             catch (Exception) { }
+        }
+
+        private void SendRadioMessageFromDashboard(string text, IWebSocketConnection socket)
+        {
+            try
+            {
+                _broker.SendRadioMessage(text);
+
+                if (string.IsNullOrEmpty(_myCallsign)) _myCallsign = GetEffectiveCallsign();
+                string sender = string.IsNullOrEmpty(_myCallsign) ? "You" : _myCallsign;
+                string freq = _com2Tx ? _com2Freq : _com1Freq;
+
+                var msgData = new
+                {
+                    Type = "RadioTextMessage",
+                    Sender = sender,
+                    Frequency = freq,
+                    Message = text,
+                    IsOutgoing = true,
+                    TimeStr = $"[{DateTime.Now:HH:mm:ss}]"
+                };
+
+                RecordAndBroadcastMessage(msgData);
+            }
+            catch (NotConnectedException)
+            {
+                SendErrorToClient(socket, "General", "Cannot send radio message: vPilot is not connected to VATSIM.");
+            }
+            catch (NotTransmittingException)
+            {
+                SendErrorToClient(socket, "General", "Cannot send radio message: Neither COM1 nor COM2 is set to TX (or avionics off).");
+            }
+            catch (Exception ex)
+            {
+                SendErrorToClient(socket, "General", $"Failed to send radio message: {ex.Message}");
+            }
+        }
+
+        private void SendPrivateMessageFromDashboard(string to, string text, IWebSocketConnection socket)
+        {
+            try
+            {
+                _broker.SendPrivateMessage(to, text);
+
+                if (string.IsNullOrEmpty(_myCallsign)) _myCallsign = GetEffectiveCallsign();
+                string sender = string.IsNullOrEmpty(_myCallsign) ? "You" : _myCallsign;
+
+                var pmData = new
+                {
+                    Type = "PrivateMessage",
+                    Tab = to,
+                    Sender = sender,
+                    Recipient = to,
+                    Message = text,
+                    IsOutgoing = true,
+                    TimeStr = $"[{DateTime.Now:HH:mm:ss}]"
+                };
+
+                RecordAndBroadcastMessage(pmData);
+            }
+            catch (NotConnectedException)
+            {
+                SendErrorToClient(socket, to, "Cannot send private message: vPilot is not connected to VATSIM.");
+            }
+            catch (Exception ex)
+            {
+                SendErrorToClient(socket, to, $"Failed to send private message: {ex.Message}");
+            }
+        }
+
+        private void RecordAndBroadcastMessage(object msgData)
+        {
+            lock (_messageHistory)
+            {
+                _messageHistory.Add(msgData);
+                if (_messageHistory.Count > 100) _messageHistory.RemoveAt(0);
+            }
+            BroadcastJson(JsonConvert.SerializeObject(msgData));
+        }
+
+        private void SendErrorToClient(IWebSocketConnection socket, string tab, string errorMessage)
+        {
+            string json = JsonConvert.SerializeObject(new
+            {
+                Type = "SystemError",
+                Tab = string.IsNullOrEmpty(tab) ? "General" : tab,
+                Message = errorMessage,
+                TimeStr = $"[{DateTime.Now:HH:mm:ss}]"
+            });
+
+            if (socket != null && socket.IsAvailable)
+            {
+                try { socket.Send(json); } catch { }
+            }
+            else
+            {
+                BroadcastJson(json);
+            }
         }
 
         private void SetActiveCom(int radio)
@@ -717,16 +838,11 @@ namespace vPilotTabletMirror
                         Sender = string.IsNullOrEmpty(senderCallsign) ? "Unknown" : senderCallsign,
                         Frequency = frequency,
                         Message = messageText,
+                        IsOutgoing = false,
                         TimeStr = $"[{DateTime.Now.ToString("HH:mm:ss")}]"
                     };
 
-                    lock (_messageHistory)
-                    {
-                        _messageHistory.Add(radioMsgData);
-                        if (_messageHistory.Count > 100) _messageHistory.RemoveAt(0);
-                    }
-
-                    BroadcastJson(JsonConvert.SerializeObject(radioMsgData));
+                    RecordAndBroadcastMessage(radioMsgData);
                 }
             }
         }
@@ -759,6 +875,7 @@ namespace vPilotTabletMirror
                         }
                     }
                     if (string.IsNullOrEmpty(senderCallsign)) senderCallsign = "Controller";
+                    senderCallsign = senderCallsign.Trim().ToUpper();
                 }
                 catch (Exception) { }
 
@@ -767,18 +884,15 @@ namespace vPilotTabletMirror
                     var pmData = new
                     {
                         Type = "PrivateMessage",
+                        Tab = senderCallsign,
                         Sender = senderCallsign,
+                        Recipient = _myCallsign,
                         Message = messageText,
+                        IsOutgoing = false,
                         TimeStr = $"[{DateTime.Now.ToString("HH:mm:ss")}]"
                     };
 
-                    lock (_messageHistory)
-                    {
-                        _messageHistory.Add(pmData);
-                        if (_messageHistory.Count > 100) _messageHistory.RemoveAt(0);
-                    }
-
-                    BroadcastJson(JsonConvert.SerializeObject(pmData));
+                    RecordAndBroadcastMessage(pmData);
                 }
             }
         }

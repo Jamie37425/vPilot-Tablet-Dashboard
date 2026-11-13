@@ -11,6 +11,8 @@ A lightweight, responsive web dashboard and companion mirror for [vPilot](https:
 ## ✨ Features
 
 - **Realistic COM1 & COM2 RX/TX Indicators**: Live indicators styled identically to the real vPilot client (`#00a2ff`). The TX light illuminates on your active transmit radio when you press your Push-To-Talk (PTT) key, and the RX light indicates incoming audio.
+- **Two-Way Radio & Private Messaging**: Type and send text messages directly from PC, tablet, or Virtual EFB — send radio text on your active COM frequency in **General / ATIS**, reply inside any private message tab, or initiate new PMs using `.msg CALLSIGN message`.
+- **Interactive Controller Actions**: Click any controller in **Controllers In Range** to reveal a 2-button bar to either start a **Private Message** tab with them or **Request ATIS** right into the General pane.
 - **In-Cockpit & Virtual EFB Compatible**: Seamlessly integrates into [Virtual EFB](https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph) or in-cockpit web browser tablets using `http://localhost:8085`.
 - **Automatic Callsign Sync**: Automatically synchronizes your active callsign straight from vPilot once connected to the VATSIM network — no manual SimBrief Pilot ID or callsign entry required.
 - **Independent Scrolling Panels**: The controller list and chat/message tabs scroll separately while keeping the top radio header and callsign fixed in view.

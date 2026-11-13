@@ -266,6 +266,43 @@
         .controller-item:hover {
             background: #2a2a2a;
         }
+        .controller-item.expanded {
+            background: #282c34;
+        }
+        .controller-actions {
+            display: none;
+            gap: 6px;
+            padding: 4px 6px 6px 24px;
+            margin-bottom: 4px;
+        }
+        .controller-actions.open {
+            display: flex;
+        }
+        .ctrl-action-btn {
+            flex: 1;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid #3c3c3c;
+            background: #232323;
+            color: #ddd;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+            text-align: center;
+        }
+        .ctrl-action-btn.pm-btn:hover,
+        .ctrl-action-btn.pm-btn:active {
+            background: rgba(0, 162, 255, 0.22);
+            border-color: #00a2ff;
+            color: #ffffff;
+        }
+        .ctrl-action-btn.atis-btn:hover,
+        .ctrl-action-btn.atis-btn:active {
+            background: rgba(75, 181, 67, 0.22);
+            border-color: #4bb543;
+            color: #ffffff;
+        }
         .tree-line {
             color: #666;
             margin-right: 6px;
@@ -406,6 +443,68 @@
             display: flex;
             flex-direction: column;
         }
+        .tab.has-unread {
+            border-color: #00a2ff;
+            color: #ffffff;
+        }
+        .tab-unread-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #00a2ff;
+            box-shadow: 0 0 6px #00a2ff;
+            display: none;
+        }
+        .tab.has-unread .tab-unread-dot {
+            display: inline-block;
+        }
+        .chat-input-bar {
+            flex-shrink: 0;
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            align-items: center;
+        }
+        #chat-input {
+            flex: 1;
+            background: #181818;
+            border: 1px solid #383838;
+            border-radius: 4px;
+            color: #ffffff;
+            padding: 9px 12px;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            min-width: 0;
+        }
+        #chat-input:focus {
+            border-color: #00a2ff;
+            box-shadow: 0 0 6px rgba(0, 162, 255, 0.35);
+        }
+        #chat-input::placeholder {
+            color: #777;
+        }
+        #send-btn {
+            background: #232323;
+            border: 1px solid #00a2ff;
+            color: #4daafc;
+            padding: 9px 18px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            flex-shrink: 0;
+        }
+        #send-btn:hover {
+            background: rgba(0, 162, 255, 0.22);
+            color: #ffffff;
+        }
+        #send-btn:active {
+            background: #00a2ff;
+            color: #ffffff;
+        }
     </style>
 </head>
 <body>
@@ -460,11 +559,19 @@
         <div id="chat-panes-container">
             <div id="pane-General" class="chat-pane active"></div>
         </div>
+        <div class="chat-input-bar">
+            <input type="text" id="chat-input" placeholder="Send radio message on COM1..." autocomplete="off" maxlength="256" />
+            <button type="button" id="send-btn" onclick="sendCurrentMessage()">Send</button>
+        </div>
     </div>
 
     <script>
         let ws;
         let activeTab = 'General';
+        let activeComTx = 1;
+        let com1FreqStr = '122.800';
+        let com2FreqStr = '121.500';
+        let expandedController = null;
         
         document.addEventListener("DOMContentLoaded", () => {
             let savedCallsign = localStorage.getItem("vPilotCallsign");
@@ -472,6 +579,17 @@
                 document.getElementById("user-callsign").innerText = savedCallsign.trim().toUpperCase();
             }
             setupPttButton();
+
+            const chatInput = document.getElementById("chat-input");
+            if (chatInput) {
+                chatInput.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        sendCurrentMessage();
+                    }
+                });
+            }
+            updateInputPlaceholder();
         });
 
         function applyCallsign(cs) {
@@ -530,10 +648,17 @@
                 const data = JSON.parse(event.data);
                 
                 if (data.Type === "Radios") {
-                    if (data.Com1) document.getElementById("com1-freq").innerText = data.Com1;
-                    if (data.Com2) document.getElementById("com2-freq").innerText = data.Com2;
+                    if (data.Com1) {
+                        com1FreqStr = data.Com1;
+                        document.getElementById("com1-freq").innerText = data.Com1;
+                    }
+                    if (data.Com2) {
+                        com2FreqStr = data.Com2;
+                        document.getElementById("com2-freq").innerText = data.Com2;
+                    }
                     if (data.Callsign) applyCallsign(data.Callsign);
                     updateRadioButtons(data);
+                    updateInputPlaceholder();
                 }
                 else if (data.Type === "Callsign") {
                     if (data.Callsign) applyCallsign(data.Callsign);
@@ -542,25 +667,27 @@
                     updateControllersList(data.List);
                 } 
                 else if (data.Type === "PrivateMessage") {
-                    handlePrivateMessage(data.Sender, data.Message, data.TimeStr);
+                    handlePrivateMessage(data);
                 }
                 else if (data.Type === "RadioTextMessage") {
-                    let freqStr = data.Frequency ? ` on ${data.Frequency}` : "";
-                    let senderStr = data.Sender || "Unknown";
-                    let timeStr = data.TimeStr || "";
-                    appendMessage("General", `${timeStr} ${senderStr}${freqStr}: ${data.Message}`, "#e0e0e0");
+                    appendRadioMessage(data);
+                }
+                else if (data.Type === "SystemError") {
+                    const targetTab = data.Tab || activeTab || "General";
+                    if (targetTab !== "General" && !document.getElementById(`tab-${targetTab}`)) {
+                        createTab(targetTab);
+                    }
+                    const prefix = data.TimeStr ? `${data.TimeStr} ` : "";
+                    appendMessage(targetTab, `${prefix}[Error] ${data.Message}`, "#ff6b6b");
                 }
                 else if (data.Type === "MessageHistory") {
                     document.querySelectorAll('.chat-pane').forEach(p => p.innerHTML = '');
                     
                     data.Messages.forEach(msg => {
                         if (msg.Type === "RadioTextMessage") {
-                            let freqStr = msg.Frequency ? ` on ${msg.Frequency}` : "";
-                            let senderStr = msg.Sender || "Unknown";
-                            let timeStr = msg.TimeStr || "";
-                            appendMessage("General", `${timeStr} ${senderStr}${freqStr}: ${msg.Message}`, "#e0e0e0");
+                            appendRadioMessage(msg);
                         } else if (msg.Type === "PrivateMessage") {
-                            handlePrivateMessage(msg.Sender, msg.Message, msg.TimeStr);
+                            handlePrivateMessage(msg, true);
                         }
                     });
                 }
@@ -571,6 +698,9 @@
         }
 
         function updateRadioButtons(data) {
+            if (data.Com1Tx) activeComTx = 1;
+            else if (data.Com2Tx) activeComTx = 2;
+
             // COM 1 TX
             const com1Tx = document.getElementById("com1-tx");
             if (com1Tx && data.Com1Tx !== undefined) {
@@ -609,6 +739,7 @@
         }
 
         function handleTxClick(radioIndex) {
+            activeComTx = radioIndex;
             if (radioIndex === 1) {
                 document.getElementById("com1-tx")?.classList.add("selected");
                 document.getElementById("com2-tx")?.classList.remove("selected");
@@ -616,6 +747,7 @@
                 document.getElementById("com2-tx")?.classList.add("selected");
                 document.getElementById("com1-tx")?.classList.remove("selected");
             }
+            updateInputPlaceholder();
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ Action: "set_active_com", Radio: radioIndex }));
             }
@@ -680,10 +812,14 @@
             const tabBtn = document.createElement("div");
             tabBtn.className = "tab";
             tabBtn.id = `tab-${tabName}`;
+            tabBtn.onclick = () => switchTab(tabName);
+
+            const unreadDot = document.createElement("span");
+            unreadDot.className = "tab-unread-dot";
+            tabBtn.appendChild(unreadDot);
             
             const titleSpan = document.createElement("span");
             titleSpan.innerText = tabName;
-            titleSpan.onclick = () => switchTab(tabName);
             tabBtn.appendChild(titleSpan);
 
             if (tabName !== 'General') {
@@ -725,15 +861,87 @@
             const targetTab = document.getElementById(`tab-${tabName}`);
             const targetPane = document.getElementById(`pane-${tabName}`);
 
-            if (targetTab) targetTab.classList.add('active');
+            if (targetTab) {
+                targetTab.classList.add('active');
+                targetTab.classList.remove('has-unread');
+            }
             if (targetPane) targetPane.classList.add('active');
             activeTab = tabName;
+            updateInputPlaceholder();
         }
 
-        function handlePrivateMessage(sender, message, timeStr) {
-            createTab(sender);
-            let prefix = timeStr ? `${timeStr} ` : "";
-            appendMessage(sender, `${prefix}[PM from ${sender}] ${message}`, "#4daafc");
+        function appendRadioMessage(data) {
+            const freqStr = data.Frequency ? ` on ${data.Frequency}` : "";
+            const senderStr = data.Sender || "Unknown";
+            const timeStr = data.TimeStr || "";
+            const color = data.IsOutgoing ? "#8fe388" : "#e0e0e0";
+            appendMessage("General", `${timeStr} ${senderStr}${freqStr}: ${data.Message}`, color);
+        }
+
+        function handlePrivateMessage(data, isHistory = false) {
+            const tabName = data.Tab || data.Sender;
+            if (!tabName) return;
+            createTab(tabName);
+            const prefix = data.TimeStr ? `${data.TimeStr} ` : "";
+            if (data.IsOutgoing) {
+                const toCallsign = data.Recipient || tabName;
+                appendMessage(tabName, `${prefix}[PM to ${toCallsign}] ${data.Message}`, "#8fe388");
+            } else {
+                appendMessage(tabName, `${prefix}[PM from ${data.Sender || tabName}] ${data.Message}`, "#4daafc");
+                if (!isHistory && activeTab !== tabName) {
+                    document.getElementById(`tab-${tabName}`)?.classList.add("has-unread");
+                }
+            }
+        }
+
+        function updateInputPlaceholder() {
+            const input = document.getElementById("chat-input");
+            if (!input) return;
+            if (activeTab === "General") {
+                const activeFreq = activeComTx === 2 ? com2FreqStr : com1FreqStr;
+                input.placeholder = `Send radio message on COM${activeComTx} (${activeFreq})... or .msg CALLSIGN message`;
+            } else {
+                input.placeholder = `Reply privately to ${activeTab}...`;
+            }
+        }
+
+        function openPrivateMessageTab(callsign) {
+            const cleanCallsign = (callsign || "").trim().toUpperCase();
+            if (!cleanCallsign) return;
+            createTab(cleanCallsign);
+            switchTab(cleanCallsign);
+            document.getElementById("chat-input")?.focus();
+        }
+
+        function sendCurrentMessage() {
+            const input = document.getElementById("chat-input");
+            if (!input) return;
+            const rawText = input.value.trim();
+            if (!rawText) return;
+
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                appendMessage(activeTab || "General", "[Error] Not connected to vPilot plugin.", "#ff6b6b");
+                return;
+            }
+
+            if (activeTab === "General") {
+                const pmMatch = rawText.match(/^\.(?:msg|chat)\s+(\S+)(?:\s+(.+))?$/i);
+                if (pmMatch) {
+                    const targetCallsign = pmMatch[1].toUpperCase();
+                    const pmBody = (pmMatch[2] || "").trim();
+                    openPrivateMessageTab(targetCallsign);
+                    if (pmBody) {
+                        ws.send(JSON.stringify({ Action: "send_private_message", To: targetCallsign, Message: pmBody }));
+                    }
+                    input.value = "";
+                    return;
+                }
+                ws.send(JSON.stringify({ Action: "send_radio_message", Message: rawText }));
+            } else {
+                ws.send(JSON.stringify({ Action: "send_private_message", To: activeTab, Message: rawText }));
+            }
+
+            input.value = "";
         }
 
         function updateControllersList(list) {
@@ -779,17 +987,43 @@
                     listEl.appendChild(header);
 
                     controllers.forEach(c => {
+                        const isExpanded = expandedController === c.Callsign;
+
                         const item = document.createElement('div');
-                        item.className = 'controller-item';
-                        
-                        item.innerHTML = `
-                            <span class="tree-line">└─</span>
-                            <span class="controller-text">${c.Callsign} - ${c.Frequency}</span>
-                        `;
-                        
-                        item.onclick = () => {
-                            let d = new Date();
-                            let timeStr = `[${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}]`;
+                        item.className = 'controller-item' + (isExpanded ? ' expanded' : '');
+
+                        const treeSpan = document.createElement('span');
+                        treeSpan.className = 'tree-line';
+                        treeSpan.innerText = '└─';
+
+                        const textSpan = document.createElement('span');
+                        textSpan.className = 'controller-text';
+                        textSpan.innerText = `${c.Callsign} - ${c.Frequency}`;
+
+                        item.appendChild(treeSpan);
+                        item.appendChild(textSpan);
+
+                        const actionsBar = document.createElement('div');
+                        actionsBar.className = 'controller-actions' + (isExpanded ? ' open' : '');
+
+                        const pmBtn = document.createElement('button');
+                        pmBtn.type = 'button';
+                        pmBtn.className = 'ctrl-action-btn pm-btn';
+                        pmBtn.innerText = 'Private Message';
+                        pmBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            openPrivateMessageTab(c.Callsign);
+                        };
+
+                        const atisBtn = document.createElement('button');
+                        atisBtn.type = 'button';
+                        atisBtn.className = 'ctrl-action-btn atis-btn';
+                        atisBtn.innerText = 'Request ATIS';
+                        atisBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            switchTab('General');
+                            const d = new Date();
+                            const timeStr = `[${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}]`;
                             appendMessage("General", `${timeStr} Requesting ATIS for ${c.Callsign}.`, "#ffd700");
                             appendMessage("General", `${c.Callsign} ATIS:`, "#4bb543");
                             if (c.Atis && c.Atis.length > 0) {
@@ -798,8 +1032,25 @@
                                 appendMessage("General", `No ATIS text available for ${c.Callsign}`, "#888");
                             }
                         };
-                        
+
+                        actionsBar.appendChild(pmBtn);
+                        actionsBar.appendChild(atisBtn);
+
+                        item.onclick = () => {
+                            const willOpen = expandedController !== c.Callsign;
+                            listEl.querySelectorAll('.controller-item.expanded').forEach(el => el.classList.remove('expanded'));
+                            listEl.querySelectorAll('.controller-actions.open').forEach(el => el.classList.remove('open'));
+                            if (willOpen) {
+                                expandedController = c.Callsign;
+                                item.classList.add('expanded');
+                                actionsBar.classList.add('open');
+                            } else {
+                                expandedController = null;
+                            }
+                        };
+
                         listEl.appendChild(item);
+                        listEl.appendChild(actionsBar);
                     });
                 }
             }
