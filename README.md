@@ -22,13 +22,38 @@ A lightweight, responsive web dashboard and companion mirror for [vPilot](https:
 
 ---
 
+## 📸 Screenshots
+
+<p align="center">
+  <img src="screenshots/multi-ptt-binds.jpg" alt="Multi-Device & Keybind PTT Binds Modal" width="850">
+  <br>
+  <em>Bind multiple controllers simultaneously (e.g., T.A320 Pilot sidestick + TCA Yoke Boeing)</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/controller-actions-radio-chat.jpg" alt="Controller 2-Button Action Bar and Radio Chat Input" width="850">
+  <br>
+  <em>Click any controller for Private Message / Request ATIS and send radio messages from General / ATIS</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/private-message-tab.jpg" alt="Private Message Tab with Controller" width="850">
+  <br>
+  <em>Dedicated private message tabs with live reply input</em>
+</p>
+
+---
+
 ## 📁 Repository Structure
 
 ```
 vPilot-Tablet-Dashboard/
 ├── Install.bat                 # 1-Click Installer (unblocks DLLs & installs to vPilot)
 ├── screenshots/
-│   └── dashboard-preview.jpg   # Tablet dashboard preview
+│   ├── dashboard-preview.jpg               # Main tablet dashboard preview
+│   ├── multi-ptt-binds.jpg                 # Multi-Device & Keybind PTT setup modal
+│   ├── controller-actions-radio-chat.jpg   # Controller action bar & radio text input
+│   └── private-message-tab.jpg             # Controller private message tab view
 ├── Dashboard/
 │   ├── index.html              # Responsive web dashboard
 │   └── Launch_Dashboard.bat    # Optional standalone launcher (without vPilot)
