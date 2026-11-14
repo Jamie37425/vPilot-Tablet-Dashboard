@@ -422,6 +422,72 @@ namespace vPilotTabletMirror
             catch (Exception) { }
         }
 
+        [EventSubscription("MetarReceived", typeof(Publisher))]
+        public void OnEventBrokerMetarReceived(object sender, EventArgs e)
+        {
+            try
+            {
+                if (e == null) return;
+                string metar = GetPropOrFieldValue<string>(e, "Data");
+                if (string.IsNullOrWhiteSpace(metar)) metar = GetPropOrFieldValue<string>(e, "Metar");
+                if (string.IsNullOrWhiteSpace(metar)) metar = GetPropOrFieldValue<string>(e, "Message");
+                if (!string.IsNullOrWhiteSpace(metar))
+                {
+                    BroadcastSystemNotification("Success", metar.Trim());
+                }
+            }
+            catch (Exception) { }
+        }
+
+        [EventSubscription("RequestedAtisReceived", typeof(Publisher))]
+        public void OnEventBrokerRequestedAtisReceived(object sender, EventArgs e)
+        {
+            try
+            {
+                if (e == null) return;
+                string from = GetPropOrFieldValue<string>(e, "From");
+                var lines = GetPropOrFieldValue<IEnumerable>(e, "Lines");
+                PublishAtisLines(from, lines);
+            }
+            catch (Exception) { }
+        }
+
+        [EventSubscription("ServerMessageReceived", typeof(Publisher))]
+        public void OnEventBrokerServerMessageReceived(object sender, EventArgs e)
+        {
+            try
+            {
+                if (e == null) return;
+                string from = GetPropOrFieldValue<string>(e, "From");
+                string msg = GetPropOrFieldValue<string>(e, "Data");
+                if (string.IsNullOrWhiteSpace(msg)) msg = GetPropOrFieldValue<string>(e, "Message");
+                if (!string.IsNullOrWhiteSpace(msg))
+                {
+                    string tag = string.IsNullOrWhiteSpace(from) ? "SERVER" : from.Trim().ToUpperInvariant();
+                    BroadcastSystemNotification("Info", $"{tag}: {msg.Trim()}");
+                }
+            }
+            catch (Exception) { }
+        }
+
+        [EventSubscription("BroadcastMessageReceived", typeof(Publisher))]
+        public void OnEventBrokerBroadcastMessageReceived(object sender, EventArgs e)
+        {
+            try
+            {
+                if (e == null) return;
+                string from = GetPropOrFieldValue<string>(e, "From");
+                string msg = GetPropOrFieldValue<string>(e, "Data");
+                if (string.IsNullOrWhiteSpace(msg)) msg = GetPropOrFieldValue<string>(e, "Message");
+                if (!string.IsNullOrWhiteSpace(msg))
+                {
+                    string tag = string.IsNullOrWhiteSpace(from) ? "SERVER" : from.Trim().ToUpperInvariant();
+                    BroadcastSystemNotification("Warning", $"[BROADCAST {tag}] {msg.Trim()}");
+                }
+            }
+            catch (Exception) { }
+        }
+
         #endregion
 
         private static string FormatFrequencyUint(uint freq)
@@ -451,13 +517,21 @@ namespace vPilotTabletMirror
                 if (prop != null)
                 {
                     var val = prop.GetValue(target);
-                    if (val != null) return (T)Convert.ChangeType(val, typeof(T));
+                    if (val != null)
+                    {
+                        if (typeof(T).IsAssignableFrom(val.GetType())) return (T)val;
+                        return (T)Convert.ChangeType(val, typeof(T));
+                    }
                 }
                 var field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase);
                 if (field != null)
                 {
                     var val = field.GetValue(target);
-                    if (val != null) return (T)Convert.ChangeType(val, typeof(T));
+                    if (val != null)
+                    {
+                        if (typeof(T).IsAssignableFrom(val.GetType())) return (T)val;
+                        return (T)Convert.ChangeType(val, typeof(T));
+                    }
                 }
             }
             catch { }
@@ -943,14 +1017,39 @@ namespace vPilotTabletMirror
             }
         }
 
+        private readonly object _recentSysLock = new object();
+        private readonly Dictionary<string, DateTime> _recentSystemMsgs = new Dictionary<string, DateTime>();
+
         private void BroadcastSystemNotification(string severity, string message)
         {
             if (string.IsNullOrWhiteSpace(message)) return;
+            string cleanSeverity = string.IsNullOrEmpty(severity) ? "Info" : severity;
+            string cleanMessage = message.Trim();
+
+            if (!string.Equals(cleanSeverity, "Command", StringComparison.OrdinalIgnoreCase))
+            {
+                string key = $"{cleanSeverity}:{cleanMessage}";
+                DateTime now = DateTime.UtcNow;
+                lock (_recentSysLock)
+                {
+                    if (_recentSystemMsgs.TryGetValue(key, out var lastSeen) && (now - lastSeen).TotalSeconds < 2.0)
+                    {
+                        return;
+                    }
+                    _recentSystemMsgs[key] = now;
+                    if (_recentSystemMsgs.Count > 50)
+                    {
+                        var stale = _recentSystemMsgs.Where(kv => (now - kv.Value).TotalSeconds > 5.0).Select(kv => kv.Key).ToList();
+                        foreach (var k in stale) _recentSystemMsgs.Remove(k);
+                    }
+                }
+            }
+
             var msgData = new
             {
                 Type = "SystemNotification",
-                Severity = string.IsNullOrEmpty(severity) ? "Info" : severity,
-                Message = message,
+                Severity = cleanSeverity,
+                Message = cleanMessage,
                 TimeStr = $"[{DateTime.Now:HH:mm:ss}]"
             };
             RecordAndBroadcastMessage(msgData);
@@ -1353,21 +1452,30 @@ namespace vPilotTabletMirror
         {
             if (e != null && !string.IsNullOrWhiteSpace(e.Metar))
             {
-                BroadcastSystemNotification("Success", $"METAR: {e.Metar}");
+                BroadcastSystemNotification("Success", e.Metar.Trim());
             }
         }
 
         private void OnAtisReceived(object sender, AtisReceivedEventArgs e)
         {
-            if (e == null || e.Lines == null || e.Lines.Count == 0) return;
-            string from = string.IsNullOrWhiteSpace(e.From) ? "Controller" : e.From.Trim().ToUpperInvariant();
+            if (e == null) return;
+            PublishAtisLines(e.From, e.Lines);
+        }
+
+        private void PublishAtisLines(string fromCallsign, IEnumerable lines)
+        {
+            if (lines == null) return;
+            var lineList = lines.Cast<object>()
+                .Select(x => x?.ToString())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToList();
+            if (lineList.Count == 0) return;
+
+            string from = string.IsNullOrWhiteSpace(fromCallsign) ? "Controller" : fromCallsign.Trim().ToUpperInvariant();
             BroadcastSystemNotification("Success", $"{from} ATIS:");
-            foreach (string line in e.Lines)
+            foreach (string line in lineList)
             {
-                if (!string.IsNullOrWhiteSpace(line))
-                {
-                    BroadcastSystemNotification("Success", line);
-                }
+                BroadcastSystemNotification("Success", line);
             }
         }
 
