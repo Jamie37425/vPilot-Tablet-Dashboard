@@ -143,6 +143,23 @@ vPilot-Tablet-Dashboard/
 
 ---
 
+## 🗑️ Uninstalling
+
+This plugin does not modify the Windows Registry or install any background services. To uninstall it:
+
+1. **Close vPilot** so the plugin files are not in use.
+2. Press `Win + R`, paste `%LOCALAPPDATA%\vPilot\Plugins`, and press **Enter**.
+3. Delete only the files installed/created by this plugin:
+   - `vPilotTabletMirror.dll`
+   - `Fleck.dll`
+   - `Newtonsoft.Json.dll`
+   - `dashboard_path.txt`
+   - `ptt_bindings.json` *(optional — stores your saved Multi-PTT bindings; delete it for a full clean removal, or leave it if you plan to reinstall later)*
+   > **Note:** Do **not** delete the entire `Plugins` folder if you have other vPilot plugins installed there.
+4. *(Optional)* Delete your extracted `vPilot-Tablet-Dashboard` folder.
+
+---
+
 ## 🛠️ Building from Source
 
 1. Open `Source/vPilotTabletMirror.sln` in Visual Studio (or build with MSBuild) targeting **.NET Framework 4.7.2**.
