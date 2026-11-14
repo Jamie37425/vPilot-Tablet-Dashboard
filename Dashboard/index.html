@@ -164,9 +164,12 @@
         .ptt-container {
             flex-shrink: 0;
             margin-bottom: 12px;
+            display: flex;
+            gap: 6px;
+            align-items: stretch;
         }
         .ptt-btn {
-            width: 100%;
+            flex: 1 1 auto;
             background: #262626;
             border: 1px solid #444;
             color: #aaa;
@@ -189,6 +192,241 @@
             color: #000000 !important;
             border-color: #00ffff !important;
             box-shadow: 0 0 14px rgba(0, 255, 255, 0.95) !important;
+        }
+        .ptt-binds-btn {
+            flex: 0 0 auto;
+            background: #20262c;
+            border: 1px solid #3f4b56;
+            color: #cbd5e1;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 6px 9px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            touch-action: manipulation;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .ptt-binds-btn:hover {
+            background: #2b3540;
+            border-color: #00a2ff;
+            color: #fff;
+        }
+        .ptt-count-badge {
+            background: #0077cc;
+            color: #fff;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 1px 5px;
+            border-radius: 10px;
+            min-width: 16px;
+            text-align: center;
+        }
+        .ptt-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            padding: 14px;
+        }
+        .ptt-modal-backdrop.open {
+            display: flex;
+        }
+        .ptt-modal {
+            width: 100%;
+            max-width: 490px;
+            max-height: 86vh;
+            background: #17191c;
+            border: 1px solid #3b424c;
+            border-radius: 10px;
+            box-shadow: 0 14px 36px rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            color: #e6e6e6;
+        }
+        .ptt-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 15px;
+            background: #1f2328;
+            border-bottom: 1px solid #30363d;
+        }
+        .ptt-modal-title {
+            font-size: 15px;
+            font-weight: bold;
+            color: #fff;
+        }
+        .ptt-modal-close {
+            background: transparent;
+            border: none;
+            color: #9aa4b2;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 2px 6px;
+        }
+        .ptt-modal-close:hover {
+            color: #fff;
+        }
+        .ptt-modal-body {
+            padding: 14px 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .ptt-help-text {
+            font-size: 12px;
+            color: #a6b0bc;
+            line-height: 1.45;
+        }
+        .ptt-capture-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .ptt-add-btn {
+            flex: 1;
+            background: #0077cc;
+            border: 1px solid #0095ff;
+            color: #fff;
+            font-size: 13px;
+            font-weight: bold;
+            padding: 9px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .ptt-add-btn:hover:not(:disabled) {
+            background: #0088eb;
+        }
+        .ptt-add-btn:disabled {
+            opacity: 0.65;
+            cursor: default;
+        }
+        .ptt-cancel-btn {
+            background: #333;
+            border: 1px solid #555;
+            color: #ddd;
+            font-size: 12px;
+            padding: 9px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: none;
+        }
+        .ptt-cancel-btn.visible {
+            display: inline-block;
+        }
+        .ptt-capture-status {
+            font-size: 12px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            background: #21252b;
+            border: 1px solid #353b45;
+            color: #b8c2cc;
+            display: none;
+        }
+        .ptt-capture-status.visible {
+            display: block;
+        }
+        .ptt-capture-status.listening {
+            background: rgba(0, 162, 255, 0.14);
+            border-color: #00a2ff;
+            color: #8fd4ff;
+        }
+        .ptt-capture-status.captured {
+            background: rgba(75, 181, 67, 0.16);
+            border-color: #4bb543;
+            color: #a3f09c;
+        }
+        .ptt-section-label {
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #8b949e;
+            margin-bottom: 6px;
+        }
+        .ptt-bind-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px 10px;
+            background: #22262c;
+            border: 1px solid #353b44;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+        }
+        .ptt-bind-row.disabled {
+            opacity: 0.55;
+        }
+        .ptt-bind-row.is-pressed {
+            background: rgba(0, 192, 192, 0.22);
+            border-color: #00ffff;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.35);
+        }
+        .ptt-bind-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            flex: 1;
+        }
+        .ptt-bind-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #f0f0f0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ptt-bind-tag {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: #2f3640;
+            color: #9ecbff;
+            flex-shrink: 0;
+        }
+        .ptt-bind-live {
+            font-size: 10px;
+            font-weight: bold;
+            color: #00ffff;
+            display: none;
+            flex-shrink: 0;
+        }
+        .ptt-bind-row.is-pressed .ptt-bind-live {
+            display: inline-block;
+        }
+        .ptt-remove-btn {
+            background: #3a2323;
+            border: 1px solid #6b3535;
+            color: #f2a2a2;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .ptt-remove-btn:hover {
+            background: #572b2b;
+            color: #fff;
+        }
+        .ptt-devices-box {
+            background: #131518;
+            border: 1px solid #2b3038;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 11px;
+            color: #94a3b8;
+            line-height: 1.5;
         }
 
         #controllers-container {
@@ -531,6 +769,9 @@
 
         <div class="ptt-container">
             <button type="button" id="ptt-btn" class="ptt-btn" title="Press & Hold to Transmit">PTT (Push to Talk)</button>
+            <button type="button" id="ptt-binds-btn" class="ptt-binds-btn" onclick="openPttModal()" title="Configure Multiple Stick / Yoke / Keyboard PTT Keys">
+                Binds <span id="ptt-bind-count" class="ptt-count-badge">0</span>
+            </button>
         </div>
 
         <div id="controllers-container">
@@ -565,6 +806,33 @@
         </div>
     </div>
 
+    <div id="ptt-modal-backdrop" class="ptt-modal-backdrop" onclick="if (event.target === this) closePttModal()">
+        <div class="ptt-modal">
+            <div class="ptt-modal-header">
+                <div class="ptt-modal-title">Multi-Device &amp; Keybind PTT</div>
+                <button type="button" class="ptt-modal-close" onclick="closePttModal()" title="Close">&times;</button>
+            </div>
+            <div class="ptt-modal-body">
+                <div class="ptt-help-text">
+                    Bind your Airbus sidestick, Boeing/Cessna yoke, throttle, or keyboard keys all at once. Press any bound button anytime while vPilot is running to transmit — no hardware switching required.
+                </div>
+                <div class="ptt-capture-controls">
+                    <button type="button" id="ptt-add-btn" class="ptt-add-btn" onclick="startPttCapture()">+ Add Stick / Yoke / Key PTT</button>
+                    <button type="button" id="ptt-cancel-btn" class="ptt-cancel-btn" onclick="cancelPttCapture()">Cancel</button>
+                </div>
+                <div id="ptt-capture-status" class="ptt-capture-status"></div>
+                <div>
+                    <div class="ptt-section-label">Active PTT Bindings</div>
+                    <div id="ptt-binds-list"></div>
+                </div>
+                <div>
+                    <div class="ptt-section-label" id="ptt-devices-header">Detected Controllers (0)</div>
+                    <div id="ptt-devices-list" class="ptt-devices-box">Scanning controllers...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         let ws;
         let activeTab = 'General';
@@ -572,6 +840,8 @@
         let com1FreqStr = '122.800';
         let com2FreqStr = '121.500';
         let expandedController = null;
+        let pttState = { Bindings: [], Devices: [], ActiveIds: [], IsCapturing: false };
+        let pttCaptureBanner = { status: '', message: '' };
         
         document.addEventListener("DOMContentLoaded", () => {
             let savedCallsign = localStorage.getItem("vPilotCallsign");
@@ -693,6 +963,23 @@
                 }
                 else if (data.Type === "ClearHistory") {
                     document.querySelectorAll('.chat-pane').forEach(p => p.innerHTML = '');
+                }
+                else if (data.Type === "PttBindings") {
+                    pttState = {
+                        Bindings: Array.isArray(data.Bindings) ? data.Bindings : [],
+                        Devices: Array.isArray(data.Devices) ? data.Devices : [],
+                        ActiveIds: Array.isArray(data.ActiveIds) ? data.ActiveIds : [],
+                        IsCapturing: !!data.IsCapturing
+                    };
+                    renderPttModal();
+                }
+                else if (data.Type === "PttCaptureStatus") {
+                    pttState.IsCapturing = data.Status === "Listening";
+                    pttCaptureBanner = {
+                        status: data.Status || '',
+                        message: data.Message || ''
+                    };
+                    renderPttModal();
                 }
             };
         }
@@ -1051,6 +1338,154 @@
 
                         listEl.appendChild(item);
                         listEl.appendChild(actionsBar);
+                    });
+                }
+            }
+        }
+
+        function openPttModal() {
+            const backdrop = document.getElementById("ptt-modal-backdrop");
+            if (!backdrop) return;
+            backdrop.classList.add("open");
+            pttCaptureBanner = { status: '', message: '' };
+            renderPttModal();
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "get_ptt_bindings" }));
+            }
+        }
+
+        function closePttModal() {
+            const backdrop = document.getElementById("ptt-modal-backdrop");
+            if (backdrop) backdrop.classList.remove("open");
+            if (pttState.IsCapturing) {
+                cancelPttCapture();
+            }
+        }
+
+        function startPttCapture() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                pttCaptureBanner = { status: 'Error', message: 'Not connected to vPilot plugin yet.' };
+                renderPttModal();
+                return;
+            }
+            ws.send(JSON.stringify({ Action: "start_ptt_capture" }));
+        }
+
+        function cancelPttCapture() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "cancel_ptt_capture" }));
+            }
+        }
+
+        function togglePttBinding(id, enabled) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "toggle_ptt_binding", Id: id, Enabled: !!enabled }));
+            }
+        }
+
+        function removePttBinding(id) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "remove_ptt_binding", Id: id }));
+            }
+        }
+
+        function renderPttModal() {
+            const bindings = pttState.Bindings || [];
+            const devices = pttState.Devices || [];
+            const activeSet = new Set(pttState.ActiveIds || []);
+            const enabledCount = bindings.filter(b => b.Enabled !== false).length;
+
+            const badgeEl = document.getElementById("ptt-bind-count");
+            if (badgeEl) badgeEl.innerText = enabledCount.toString();
+
+            const addBtn = document.getElementById("ptt-add-btn");
+            const cancelBtn = document.getElementById("ptt-cancel-btn");
+            if (addBtn) {
+                addBtn.disabled = !!pttState.IsCapturing;
+                addBtn.innerText = pttState.IsCapturing ? "Listening for Stick / Yoke / Key..." : "+ Add Stick / Yoke / Key PTT";
+            }
+            if (cancelBtn) {
+                cancelBtn.classList.toggle("visible", !!pttState.IsCapturing);
+            }
+
+            const statusEl = document.getElementById("ptt-capture-status");
+            if (statusEl) {
+                statusEl.className = "ptt-capture-status";
+                if (pttCaptureBanner.message) {
+                    statusEl.classList.add("visible");
+                    if (pttCaptureBanner.status === "Listening") statusEl.classList.add("listening");
+                    else if (pttCaptureBanner.status === "Captured") statusEl.classList.add("captured");
+                    statusEl.innerText = pttCaptureBanner.message;
+                } else {
+                    statusEl.innerText = "";
+                }
+            }
+
+            const listEl = document.getElementById("ptt-binds-list");
+            if (listEl) {
+                listEl.innerHTML = "";
+                if (bindings.length === 0) {
+                    const emptyDiv = document.createElement("div");
+                    emptyDiv.style.cssText = "color:#888; font-size:12px; font-style:italic; padding:6px 0;";
+                    emptyDiv.innerText = "No extra PTT bindings saved yet. Click \"+ Add Stick / Yoke / Key PTT\" above and press a button on your stick or yoke.";
+                    listEl.appendChild(emptyDiv);
+                } else {
+                    bindings.forEach(b => {
+                        const isPressed = activeSet.has(b.Id);
+                        const row = document.createElement("div");
+                        row.className = "ptt-bind-row" + (b.Enabled === false ? " disabled" : "") + (isPressed ? " is-pressed" : "");
+
+                        const left = document.createElement("div");
+                        left.className = "ptt-bind-left";
+
+                        const cb = document.createElement("input");
+                        cb.type = "checkbox";
+                        cb.checked = b.Enabled !== false;
+                        cb.title = "Enable / Disable this PTT bind";
+                        cb.onchange = () => togglePttBinding(b.Id, cb.checked);
+
+                        const tag = document.createElement("span");
+                        tag.className = "ptt-bind-tag";
+                        tag.innerText = b.Kind === "JoystickButton" ? "STICK / YOKE" : "KEY";
+
+                        const label = document.createElement("span");
+                        label.className = "ptt-bind-label";
+                        label.innerText = b.DisplayLabel || (b.Kind === "JoystickButton" ? `${b.DeviceName} — Button ${(b.ButtonIndex || 0) + 1}` : `Keyboard — ${b.DeviceName}`);
+
+                        const live = document.createElement("span");
+                        live.className = "ptt-bind-live";
+                        live.innerText = "TX";
+
+                        left.appendChild(cb);
+                        left.appendChild(tag);
+                        left.appendChild(label);
+                        left.appendChild(live);
+
+                        const rm = document.createElement("button");
+                        rm.type = "button";
+                        rm.className = "ptt-remove-btn";
+                        rm.innerText = "Remove";
+                        rm.onclick = () => removePttBinding(b.Id);
+
+                        row.appendChild(left);
+                        row.appendChild(rm);
+                        listEl.appendChild(row);
+                    });
+                }
+            }
+
+            const devHeader = document.getElementById("ptt-devices-header");
+            const devList = document.getElementById("ptt-devices-list");
+            if (devHeader) devHeader.innerText = `Detected Controllers (${devices.length})`;
+            if (devList) {
+                devList.innerHTML = "";
+                if (devices.length === 0) {
+                    devList.innerText = "No USB flight controllers detected right now (keyboard binds still work).";
+                } else {
+                    devices.forEach(d => {
+                        const line = document.createElement("div");
+                        line.innerText = `• ${d.Name}`;
+                        devList.appendChild(line);
                     });
                 }
             }

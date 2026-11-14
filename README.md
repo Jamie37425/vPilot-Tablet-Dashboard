@@ -11,6 +11,7 @@ A lightweight, responsive web dashboard and companion mirror for [vPilot](https:
 ## ✨ Features
 
 - **Realistic COM1 & COM2 RX/TX Indicators**: Live indicators styled identically to the real vPilot client (`#00a2ff`). The TX light illuminates on your active transmit radio when you press your Push-To-Talk (PTT) key, and the RX light indicates incoming audio.
+- **Multi-Device & Keybind PTT**: Bind multiple flight controls (for example, both an Airbus sidestick AND a Boeing/Cessna yoke) plus keyboard/mouse keys at the same time — no more changing vPilot PTT settings when swapping hardware. Runs silently inside vPilot even when the dashboard browser is closed.
 - **Two-Way Radio & Private Messaging**: Type and send text messages directly from PC, tablet, or Virtual EFB — send radio text on your active COM frequency in **General / ATIS**, reply inside any private message tab, or initiate new PMs using `.msg CALLSIGN message`.
 - **Interactive Controller Actions**: Click any controller in **Controllers In Range** to reveal a 2-button bar to either start a **Private Message** tab with them or **Request ATIS** right into the General pane.
 - **In-Cockpit & Virtual EFB Compatible**: Seamlessly integrates into [Virtual EFB](https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph) or in-cockpit web browser tablets using `http://localhost:8085`.
@@ -115,6 +116,7 @@ To view the dashboard from your tablet or another device on your local Wi-Fi:
   - Or type `.msg CALLSIGN message` (or `.chat CALLSIGN message`) from **General / ATIS** to start a PM tab directly.
   - Unread incoming PMs display a glowing dot on inactive tabs until opened.
 - **Request ATIS**: Tap **Request ATIS** from a controller's action bar to print their VATSIM ATIS in **General / ATIS**.
+- **Multi-Device PTT Binds**: Click **Binds** next to the **PTT** button, click **+ Add Stick / Yoke / Key PTT**, and press the trigger/PTT button on your sidestick, yoke, throttle, or keyboard. Add as many controls as you like — bindings are saved in `%LOCALAPPDATA%\vPilot\Plugins\ptt_bindings.json` and stay active whenever vPilot runs.
 
 ---
 

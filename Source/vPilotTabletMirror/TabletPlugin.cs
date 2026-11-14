@@ -52,6 +52,13 @@ namespace vPilotTabletMirror
         private bool _pttActive = false;
         private string _myCallsign = "";
 
+        // Multi-PTT Fields
+        private MultiPttManager _multiPttManager;
+        private readonly object _pttLock = new object();
+        private bool _hardwarePttActive = false;
+        private bool _dashboardPttActive = false;
+        private bool _lastSentPluginPtt = false;
+
         // SimConnect Fields
         private SimConnect _simConnect = null;
         private EventWaitHandle _simConnectEvent = new AutoResetEvent(false);
@@ -117,6 +124,24 @@ namespace vPilotTabletMirror
 
             // Auto-launch the dashboard web server silently in the background
             StartDashboardServer();
+
+            // Initialize Multi-Device & Multi-Keybind PTT Manager
+            try
+            {
+                string pluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
+                    ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "vPilot", "Plugins");
+                string pttConfigPath = Path.Combine(pluginDir, "ptt_bindings.json");
+                _multiPttManager = new MultiPttManager(pttConfigPath);
+                _multiPttManager.HardwarePttChanged += (pressed, activeIds) =>
+                {
+                    ApplyPttState(hardwarePressed: pressed, dashboardPressed: null);
+                    BroadcastPttBindings();
+                };
+                _multiPttManager.BindingsUpdated += () => BroadcastPttBindings();
+                _multiPttManager.CaptureStatusChanged += (status, binding, msg) => BroadcastPttCaptureStatus(status, binding, msg);
+                _multiPttManager.Start();
+            }
+            catch (Exception) { }
 
             FleckLog.Level = LogLevel.Info;
             // Using port 9090 to avoid potential local conflicts with MobiFlight
@@ -397,27 +422,35 @@ namespace vPilotTabletMirror
                 {
                     if (command.TryGetValue("Pressed", out var pressedObj) && bool.TryParse(pressedObj?.ToString(), out bool pressed))
                     {
-                        _broker.SetPtt(pressed);
-                        _pttActive = pressed;
-                        if (_pttActive)
-                        {
-                            if (_com2Tx)
-                            {
-                                _com2TxActive = true;
-                                _com1TxActive = false;
-                            }
-                            else
-                            {
-                                _com1TxActive = true;
-                                _com2TxActive = false;
-                            }
-                        }
-                        else
-                        {
-                            _com1TxActive = false;
-                            _com2TxActive = false;
-                        }
-                        BroadcastRadioStateQuick();
+                        ApplyPttState(hardwarePressed: null, dashboardPressed: pressed);
+                    }
+                }
+                else if (action == "get_ptt_bindings")
+                {
+                    SendPttBindingsToSocket(socket);
+                }
+                else if (action == "start_ptt_capture")
+                {
+                    _multiPttManager?.StartCapture(15000);
+                }
+                else if (action == "cancel_ptt_capture")
+                {
+                    _multiPttManager?.CancelCapture();
+                }
+                else if (action == "remove_ptt_binding")
+                {
+                    if (command.TryGetValue("Id", out var idObj))
+                    {
+                        _multiPttManager?.RemoveBinding(idObj?.ToString());
+                    }
+                }
+                else if (action == "toggle_ptt_binding")
+                {
+                    if (command.TryGetValue("Id", out var idObj) &&
+                        command.TryGetValue("Enabled", out var enObj) &&
+                        bool.TryParse(enObj?.ToString(), out bool enabled))
+                    {
+                        _multiPttManager?.SetBindingEnabled(idObj?.ToString(), enabled);
                     }
                 }
                 else if (action == "get_state")
@@ -475,6 +508,139 @@ namespace vPilotTabletMirror
                 }
             }
             catch (Exception) { }
+        }
+
+        private void ApplyPttState(bool? hardwarePressed, bool? dashboardPressed)
+        {
+            bool combined;
+            bool shouldNotifyBroker;
+
+            lock (_pttLock)
+            {
+                if (hardwarePressed.HasValue) _hardwarePttActive = hardwarePressed.Value;
+                if (dashboardPressed.HasValue) _dashboardPttActive = dashboardPressed.Value;
+
+                combined = _hardwarePttActive || _dashboardPttActive;
+                shouldNotifyBroker = combined != _lastSentPluginPtt;
+                if (shouldNotifyBroker)
+                {
+                    _lastSentPluginPtt = combined;
+                    _pttActive = combined;
+                    if (combined)
+                    {
+                        if (_com2Tx)
+                        {
+                            _com2TxActive = true;
+                            _com1TxActive = false;
+                        }
+                        else
+                        {
+                            _com1TxActive = true;
+                            _com2TxActive = false;
+                        }
+                    }
+                    else
+                    {
+                        _com1TxActive = false;
+                        _com2TxActive = false;
+                    }
+                }
+            }
+
+            if (shouldNotifyBroker)
+            {
+                try { _broker?.SetPtt(combined); } catch { }
+                BroadcastRadioStateQuick();
+            }
+        }
+
+        private object GetPttBindingsPayload()
+        {
+            var manager = _multiPttManager;
+            var bindings = manager != null
+                ? manager.GetBindingsSnapshot().Select(b => new
+                {
+                    b.Id,
+                    b.Kind,
+                    b.DeviceName,
+                    b.InstanceGuid,
+                    b.ProductGuid,
+                    b.ButtonIndex,
+                    b.VirtualKeyCode,
+                    b.Enabled,
+                    b.DisplayLabel
+                }).ToList()
+                : new object[0].Select(_ => new
+                {
+                    Id = "",
+                    Kind = "",
+                    DeviceName = "",
+                    InstanceGuid = "",
+                    ProductGuid = "",
+                    ButtonIndex = 0,
+                    VirtualKeyCode = 0,
+                    Enabled = true,
+                    DisplayLabel = ""
+                }).ToList();
+
+            var devices = manager?.GetConnectedDevicesSnapshot() ?? new List<ConnectedInputDevice>();
+            var activeIds = manager?.GetActiveBindingIdsSnapshot() ?? new List<string>();
+
+            return new
+            {
+                Type = "PttBindings",
+                Bindings = bindings,
+                Devices = devices,
+                ActiveIds = activeIds,
+                IsCapturing = manager?.IsCapturing ?? false
+            };
+        }
+
+        private void SendPttBindingsToSocket(IWebSocketConnection socket)
+        {
+            try
+            {
+                string json = JsonConvert.SerializeObject(GetPttBindingsPayload());
+                if (socket != null && socket.IsAvailable)
+                {
+                    socket.Send(json);
+                }
+            }
+            catch { }
+        }
+
+        private void BroadcastPttBindings()
+        {
+            try
+            {
+                BroadcastJson(JsonConvert.SerializeObject(GetPttBindingsPayload()));
+            }
+            catch { }
+        }
+
+        private void BroadcastPttCaptureStatus(string status, PttBinding binding, string message)
+        {
+            try
+            {
+                var payload = new
+                {
+                    Type = "PttCaptureStatus",
+                    Status = status,
+                    Message = message,
+                    Binding = binding != null ? new
+                    {
+                        binding.Id,
+                        binding.Kind,
+                        binding.DeviceName,
+                        binding.ButtonIndex,
+                        binding.VirtualKeyCode,
+                        binding.Enabled,
+                        binding.DisplayLabel
+                    } : null
+                };
+                BroadcastJson(JsonConvert.SerializeObject(payload));
+            }
+            catch { }
         }
 
         private void SendRadioMessageFromDashboard(string text, IWebSocketConnection socket)
@@ -1158,6 +1324,8 @@ namespace vPilotTabletMirror
                 }
                 var historyData = new { Type = "MessageHistory", Messages = history };
                 if (socket.IsAvailable) socket.Send(JsonConvert.SerializeObject(historyData));
+
+                SendPttBindingsToSocket(socket);
             }
             catch (Exception) { }
         }
@@ -1198,6 +1366,24 @@ namespace vPilotTabletMirror
 
         public void Shutdown()
         {
+            try
+            {
+                _multiPttManager?.Dispose();
+                _multiPttManager = null;
+            }
+            catch { }
+
+            lock (_pttLock)
+            {
+                if (_lastSentPluginPtt)
+                {
+                    _lastSentPluginPtt = false;
+                    _hardwarePttActive = false;
+                    _dashboardPttActive = false;
+                    try { _broker?.SetPtt(false); } catch { }
+                }
+            }
+
             StopDashboardServer();
 
             _pollTimer?.Dispose();
