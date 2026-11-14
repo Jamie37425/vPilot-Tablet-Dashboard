@@ -13,7 +13,7 @@ A lightweight, real-time web companion and **Multi-Device PTT** plugin for [vPil
 - **Multi-Device & Keybind PTT**: Bind multiple controllers simultaneously (such as an Airbus sidestick **and** a Boeing/Cessna yoke, throttle switches, or keyboard/mouse keys) with one press inside the **Binds** panel. No more changing vPilot's single PTT setting when swapping aircraft or hardware.
   - Works **silently inside vPilot** whenever vPilot is open — **even when the dashboard browser is closed**.
   - Saved persistently to `%LOCALAPPDATA%\vPilot\Plugins\ptt_bindings.json` and skips held toggle switches cleanly when binding.
-- **Two-Way Radio & Private Messaging**: Type and send radio text messages on your active COM TX frequency from **General / ATIS**, reply inside private message tabs, or start a PM anytime using `.msg CALLSIGN message`. Incoming PMs on inactive tabs show a glowing unread indicator.
+- **Two-Way Radio, Dot-Commands & Private Messaging**: Type and send radio text messages on your active COM TX frequency from **General / ATIS**, run native vPilot dot-commands (`.ctaf KJFK`, `.wx ICAO` / `.metar ICAO`, `.atis CALLSIGN`, `.com1`/`.com2`, `.x`/`.sq`, `.wallop`, `.clear`), reply inside private message tabs, or start a PM anytime using `.msg`, `.chat`, or `.message CALLSIGN [text]`. Command replies (CTAF frequencies, METARs, ATIS, and system notices) mirror back live to all open screens, and incoming PMs on inactive tabs show a glowing unread indicator.
 - **Controller 2-Button Action Bar**: Click any controller under **Controllers In Range** to open **Private Message** or **Request ATIS** right underneath that controller.
 - **Live Multi-Screen Sync**: Your PC browser, Virtual EFB, and physical tablet all stay synchronized in real time over WebSockets — COM1/COM2 TX & RX lights, PTT state, chat history, PM tabs, and PTT binds mirror automatically across every open client.
 - **Zero External Dependencies**: Built-in web server (port `8085`) and WebSocket server (port `9090`) start automatically when vPilot opens and close cleanly when vPilot exits — no Python or manual launcher needed.
@@ -97,9 +97,17 @@ All open sessions (PC browser, Virtual EFB, and tablet) mirror vPilot and stay s
 3. Repeat once for your **yoke** (or any throttle button / keyboard key / mouse button).
 4. Both stay active at the same time in the background whenever **vPilot** is running — you do **not** need to keep the dashboard browser open, and you don't even need a PTT key bound in vPilot's own settings.
 
-### Radio, Private Messages & ATIS
+### Radio, Dot-Commands, Private Messages & ATIS
 - **Send Radio Text:** Select the **General / ATIS** tab, type your message, and press **Enter** or **Send** to transmit on your active COM TX frequency.
-- **Private Message / Request ATIS:** Click any controller in **Controllers In Range** to expand the 2-button bar (**Private Message** | **Request ATIS**). You can also type `.msg CALLSIGN message` in **General / ATIS**.
+- **vPilot Dot-Commands:** Run native vPilot commands directly from any PC or tablet browser — replies (CTAF frequencies, METARs, ATIS lines, and errors) appear automatically in **General / ATIS** across all synced devices:
+  - `.ctaf KJFK` — Look up an airport's CTAF frequency
+  - `.wx KJFK` / `.metar KJFK` — Fetch live METAR weather
+  - `.atis EGPH_ATIS` — Request a controller's VATSIM ATIS
+  - `.com1 124.850` / `.com2 121.500` — Tune COM1 or COM2 frequency
+  - `.x 2200` / `.sq 7000` — Set transponder squawk code
+  - `.msg CALLSIGN [text]` / `.chat CALLSIGN` / `.message CALLSIGN` — Open a PM tab (and send text if included)
+  - `.clear` — Clear the dashboard message log
+- **Controller 2-Button Bar:** Click any controller in **Controllers In Range** to expand the 2-button bar (**Private Message** | **Request ATIS**).
 - **Unread PM Badge:** Inactive PM tabs show a glowing dot whenever a new message arrives until you open that tab.
 
 ---

@@ -115,6 +115,9 @@ namespace vPilotTabletMirror
             _broker.ControllerDeleted += OnControllerDeleted;
             _broker.RadioMessageReceived += OnRadioMessageReceived;
             _broker.PrivateMessageReceived += OnPrivateMessageReceived;
+            _broker.BroadcastMessageReceived += OnBroadcastMessageReceived;
+            _broker.MetarReceived += OnMetarReceived;
+            _broker.AtisReceived += OnAtisReceived;
             _broker.NetworkConnected += OnNetworkConnected;
             _broker.NetworkDisconnected += OnNetworkDisconnected;
 
@@ -368,6 +371,57 @@ namespace vPilotTabletMirror
             catch (Exception) { }
         }
 
+        [EventSubscription("NotificationPosted", typeof(Publisher))]
+        public void OnNotificationPosted(object sender, EventArgs e)
+        {
+            try
+            {
+                if (e == null) return;
+                string message = GetPropOrFieldValue<string>(e, "Message");
+                if (string.IsNullOrWhiteSpace(message)) return;
+
+                string typeName = GetPropOrFieldValue<object>(e, "Type")?.ToString() ?? "Info";
+                string severity = "Info";
+                if (string.Equals(typeName, "Error", StringComparison.OrdinalIgnoreCase)) severity = "Error";
+                else if (string.Equals(typeName, "Warning", StringComparison.OrdinalIgnoreCase)) severity = "Warning";
+
+                BroadcastSystemNotification(severity, message);
+            }
+            catch (Exception) { }
+        }
+
+        [EventSubscription("CommandValidationFailed", typeof(Publisher))]
+        public void OnCommandValidationFailed(object sender, EventArgs e)
+        {
+            try
+            {
+                if (e == null) return;
+                string err = GetPropOrFieldValue<string>(e, "ErrorMessage");
+                if (!string.IsNullOrWhiteSpace(err))
+                {
+                    BroadcastSystemNotification("Error", err);
+                }
+            }
+            catch (Exception) { }
+        }
+
+        [EventSubscription("WallopSent", typeof(Publisher))]
+        public void OnWallopSent(object sender, EventArgs e)
+        {
+            try
+            {
+                if (e == null) return;
+                string callsign = GetPropOrFieldValue<string>(e, "OurCallsign");
+                string msg = GetPropOrFieldValue<string>(e, "Message");
+                if (!string.IsNullOrWhiteSpace(msg))
+                {
+                    string prefix = string.IsNullOrEmpty(callsign) ? "[WALLOP]" : $"[WALLOP {callsign}]";
+                    BroadcastSystemNotification("Info", $"{prefix} {msg}");
+                }
+            }
+            catch (Exception) { }
+        }
+
         #endregion
 
         private static string FormatFrequencyUint(uint freq)
@@ -482,6 +536,17 @@ namespace vPilotTabletMirror
                         if (!string.IsNullOrEmpty(text))
                         {
                             SendRadioMessageFromDashboard(text, socket);
+                        }
+                    }
+                }
+                else if (action == "send_command")
+                {
+                    if (command.TryGetValue("Command", out var cmdObj))
+                    {
+                        string text = cmdObj?.ToString()?.Trim();
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            ExecuteDotCommandFromDashboard(text, socket);
                         }
                     }
                 }
@@ -643,8 +708,17 @@ namespace vPilotTabletMirror
             catch { }
         }
 
+        private MethodInfo _cachedCommandParserMethod;
+        private bool _searchedCommandParser;
+
         private void SendRadioMessageFromDashboard(string text, IWebSocketConnection socket)
         {
+            if (!string.IsNullOrWhiteSpace(text) && text.TrimStart().StartsWith("."))
+            {
+                ExecuteDotCommandFromDashboard(text.Trim(), socket);
+                return;
+            }
+
             try
             {
                 _broker.SendRadioMessage(text);
@@ -677,6 +751,209 @@ namespace vPilotTabletMirror
             {
                 SendErrorToClient(socket, "General", $"Failed to send radio message: {ex.Message}");
             }
+        }
+
+        private void ExecuteDotCommandFromDashboard(string rawCommand, IWebSocketConnection socket)
+        {
+            string cmdText = (rawCommand ?? "").Trim();
+            if (string.IsNullOrEmpty(cmdText)) return;
+
+            if (string.Equals(cmdText, ".clear", StringComparison.OrdinalIgnoreCase))
+            {
+                lock (_messageHistory)
+                {
+                    _messageHistory.Clear();
+                }
+                BroadcastJson(JsonConvert.SerializeObject(new { Type = "ClearHistory" }));
+                return;
+            }
+
+            // Handle .msg / .chat / .message consistently across dashboard tabs and vPilot
+            var pmMatch = System.Text.RegularExpressions.Regex.Match(
+                cmdText,
+                @"^\.(?:msg|message|chat)(?:\s+(\S+)(?:\s+(.+))?)?$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (pmMatch.Success)
+            {
+                string targetCallsign = pmMatch.Groups[1].Value.Trim().ToUpperInvariant();
+                if (string.IsNullOrEmpty(targetCallsign))
+                {
+                    SendErrorToClient(socket, "General", "Usage: .msg CALLSIGN [message]");
+                    return;
+                }
+
+                string pmBody = pmMatch.Groups[2].Value.Trim();
+                BroadcastJson(JsonConvert.SerializeObject(new { Type = "OpenChatTab", Callsign = targetCallsign }));
+
+                if (!string.IsNullOrEmpty(pmBody))
+                {
+                    SendPrivateMessageFromDashboard(targetCallsign, pmBody, socket);
+                }
+                else
+                {
+                    TryFireVpilotCommand(BuildKnownCommandFallback(GetVpilotAssembly(), $".chat {targetCallsign}"), socket);
+                }
+                return;
+            }
+
+            try
+            {
+                var vpilotAssembly = GetVpilotAssembly();
+                if (vpilotAssembly == null || _eventBroker == null)
+                {
+                    SendErrorToClient(socket, "General", "vPilot command dispatcher is not ready.");
+                    return;
+                }
+
+                object parsedCmd = null;
+                var parserMethod = ResolveVpilotCommandParser(vpilotAssembly);
+                if (parserMethod != null)
+                {
+                    try
+                    {
+                        parsedCmd = parserMethod.Invoke(null, new object[] { cmdText });
+                    }
+                    catch (TargetInvocationException tie) when (tie.InnerException != null)
+                    {
+                        SendErrorToClient(socket, "General", tie.InnerException.Message);
+                        return;
+                    }
+                }
+                else
+                {
+                    parsedCmd = BuildKnownCommandFallback(vpilotAssembly, cmdText);
+                    if (parsedCmd == null)
+                    {
+                        SendErrorToClient(socket, "General", $"Unsupported or unknown command: {cmdText.Split(' ')[0]}");
+                        return;
+                    }
+                }
+
+                if (parsedCmd == null)
+                {
+                    SendErrorToClient(socket, "General", $"Unknown command: {cmdText}");
+                    return;
+                }
+
+                BroadcastSystemNotification("Command", $"> {cmdText}");
+                TryFireVpilotCommand(parsedCmd, socket);
+            }
+            catch (Exception ex)
+            {
+                SendErrorToClient(socket, "General", $"Command error: {ex.Message}");
+            }
+        }
+
+        private Assembly GetVpilotAssembly()
+        {
+            return AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "vPilot");
+        }
+
+        private MethodInfo ResolveVpilotCommandParser(Assembly vpilotAssembly)
+        {
+            if (_searchedCommandParser) return _cachedCommandParserMethod;
+            _searchedCommandParser = true;
+
+            try
+            {
+                var commandBaseType = vpilotAssembly?.GetType("RossCarlson.Vatsim.Vpilot.Commands.Commands.Command");
+                if (commandBaseType == null) return null;
+
+                var gaMethod = vpilotAssembly.GetType("ga")?.GetMethod(
+                    "b",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                    null,
+                    new[] { typeof(string) },
+                    null);
+
+                if (gaMethod != null && commandBaseType.IsAssignableFrom(gaMethod.ReturnType))
+                {
+                    _cachedCommandParserMethod = gaMethod;
+                    return _cachedCommandParserMethod;
+                }
+
+                foreach (var type in vpilotAssembly.GetTypes())
+                {
+                    foreach (var m in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly))
+                    {
+                        var parameters = m.GetParameters();
+                        if (parameters.Length == 1 &&
+                            parameters[0].ParameterType == typeof(string) &&
+                            commandBaseType.IsAssignableFrom(m.ReturnType))
+                        {
+                            _cachedCommandParserMethod = m;
+                            return _cachedCommandParserMethod;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private object BuildKnownCommandFallback(Assembly vpilotAssembly, string cmdText)
+        {
+            try
+            {
+                if (vpilotAssembly == null || string.IsNullOrWhiteSpace(cmdText)) return null;
+                var parts = cmdText.Trim().Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                string verb = parts[0].ToLowerInvariant();
+                string arg = parts.Length > 1 ? parts[1].Trim() : "";
+
+                if (verb == ".ctaf" && !string.IsNullOrEmpty(arg))
+                    return CreateVpilotCommand(vpilotAssembly, "GetCtafFrequencyCommand", arg.ToUpperInvariant());
+                if ((verb == ".wx" || verb == ".metar") && !string.IsNullOrEmpty(arg))
+                    return CreateVpilotCommand(vpilotAssembly, "RequestMetarCommand", arg.ToUpperInvariant());
+                if (verb == ".atis" && !string.IsNullOrEmpty(arg))
+                    return CreateVpilotCommand(vpilotAssembly, "RequestAtisCommand", arg.ToUpperInvariant());
+                if (verb == ".chat" && !string.IsNullOrEmpty(arg))
+                    return CreateVpilotCommand(vpilotAssembly, "StartChatSessionCommand", arg.ToUpperInvariant());
+                if (verb == ".wallop" && !string.IsNullOrEmpty(arg))
+                    return CreateVpilotCommand(vpilotAssembly, "SendWallopCommand", arg);
+                if (verb == ".tune" && !string.IsNullOrEmpty(arg))
+                    return CreateVpilotCommand(vpilotAssembly, "TuneControllerFrequencyCommand", arg.ToUpperInvariant());
+            }
+            catch { }
+
+            return null;
+        }
+
+        private object CreateVpilotCommand(Assembly vpilotAssembly, string shortTypeName, params object[] ctorArgs)
+        {
+            var t = vpilotAssembly?.GetType($"RossCarlson.Vatsim.Vpilot.Commands.Commands.{shortTypeName}");
+            return t != null ? Activator.CreateInstance(t, ctorArgs) : null;
+        }
+
+        private void TryFireVpilotCommand(object commandInstance, IWebSocketConnection socket)
+        {
+            if (commandInstance == null || _eventBroker == null) return;
+            try
+            {
+                var vpilotAssembly = GetVpilotAssembly();
+                var cmdArgsType = vpilotAssembly?.GetType("RossCarlson.Vatsim.Vpilot.Events.Arguments.CommandSubmittedEventArgs");
+                if (cmdArgsType == null) return;
+                var args = Activator.CreateInstance(cmdArgsType, new[] { commandInstance });
+                _eventBroker.Fire("CommandSubmitted", this, HandlerRestriction.None, this, (EventArgs)args);
+            }
+            catch (Exception ex)
+            {
+                SendErrorToClient(socket, "General", $"Failed to execute command: {ex.Message}");
+            }
+        }
+
+        private void BroadcastSystemNotification(string severity, string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return;
+            var msgData = new
+            {
+                Type = "SystemNotification",
+                Severity = string.IsNullOrEmpty(severity) ? "Info" : severity,
+                Message = message,
+                TimeStr = $"[{DateTime.Now:HH:mm:ss}]"
+            };
+            RecordAndBroadcastMessage(msgData);
         }
 
         private void SendPrivateMessageFromDashboard(string to, string text, IWebSocketConnection socket)
@@ -1059,6 +1336,37 @@ namespace vPilotTabletMirror
                     };
 
                     RecordAndBroadcastMessage(pmData);
+                }
+            }
+        }
+
+        private void OnBroadcastMessageReceived(object sender, BroadcastMessageReceivedEventArgs e)
+        {
+            if (e != null && !string.IsNullOrWhiteSpace(e.Message))
+            {
+                string from = string.IsNullOrWhiteSpace(e.From) ? "SERVER" : e.From.Trim().ToUpperInvariant();
+                BroadcastSystemNotification("Warning", $"[BROADCAST {from}] {e.Message}");
+            }
+        }
+
+        private void OnMetarReceived(object sender, MetarReceivedEventArgs e)
+        {
+            if (e != null && !string.IsNullOrWhiteSpace(e.Metar))
+            {
+                BroadcastSystemNotification("Success", $"METAR: {e.Metar}");
+            }
+        }
+
+        private void OnAtisReceived(object sender, AtisReceivedEventArgs e)
+        {
+            if (e == null || e.Lines == null || e.Lines.Count == 0) return;
+            string from = string.IsNullOrWhiteSpace(e.From) ? "Controller" : e.From.Trim().ToUpperInvariant();
+            BroadcastSystemNotification("Success", $"{from} ATIS:");
+            foreach (string line in e.Lines)
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    BroadcastSystemNotification("Success", line);
                 }
             }
         }

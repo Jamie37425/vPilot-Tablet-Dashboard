@@ -951,6 +951,12 @@
                 else if (data.Type === "RadioTextMessage") {
                     appendRadioMessage(data);
                 }
+                else if (data.Type === "SystemNotification") {
+                    appendSystemNotification(data);
+                }
+                else if (data.Type === "OpenChatTab") {
+                    if (data.Callsign) createTab(data.Callsign);
+                }
                 else if (data.Type === "SystemError") {
                     const targetTab = data.Tab || activeTab || "General";
                     if (targetTab !== "General" && !document.getElementById(`tab-${targetTab}`)) {
@@ -967,6 +973,8 @@
                             appendRadioMessage(msg);
                         } else if (msg.Type === "PrivateMessage") {
                             handlePrivateMessage(msg, true);
+                        } else if (msg.Type === "SystemNotification") {
+                            appendSystemNotification(msg);
                         }
                     });
                 }
@@ -1174,6 +1182,19 @@
             appendMessage("General", `${timeStr} ${senderStr}${freqStr}: ${data.Message}`, color);
         }
 
+        function appendSystemNotification(data) {
+            const prefix = data.TimeStr ? `${data.TimeStr} ` : "";
+            const sev = (data.Severity || "Info").toLowerCase();
+            const colorMap = {
+                error: "#ff6b6b",
+                warning: "#ffab40",
+                success: "#4bb543",
+                command: "#7cc4ff",
+                info: "#ffd700"
+            };
+            appendMessage("General", `${prefix}${data.Message}`, colorMap[sev] || "#ffd700");
+        }
+
         function handlePrivateMessage(data, isHistory = false) {
             const tabName = data.Tab || data.Sender;
             if (!tabName) return;
@@ -1195,7 +1216,7 @@
             if (!input) return;
             if (activeTab === "General") {
                 const activeFreq = activeComTx === 2 ? com2FreqStr : com1FreqStr;
-                input.placeholder = `Send radio message on COM${activeComTx} (${activeFreq})... or .msg CALLSIGN message`;
+                input.placeholder = `Send radio text on COM${activeComTx} (${activeFreq})... or .ctaf / .wx / .msg CALLSIGN`;
             } else {
                 input.placeholder = `Reply privately to ${activeTab}...`;
             }
@@ -1220,18 +1241,18 @@
                 return;
             }
 
-            if (activeTab === "General") {
-                const pmMatch = rawText.match(/^\.(?:msg|chat)\s+(\S+)(?:\s+(.+))?$/i);
+            if (rawText.startsWith(".")) {
+                const pmMatch = rawText.match(/^\.(?:msg|message|chat)\s+(\S+)(?:\s+(.+))?$/i);
                 if (pmMatch) {
                     const targetCallsign = pmMatch[1].toUpperCase();
-                    const pmBody = (pmMatch[2] || "").trim();
                     openPrivateMessageTab(targetCallsign);
-                    if (pmBody) {
-                        ws.send(JSON.stringify({ Action: "send_private_message", To: targetCallsign, Message: pmBody }));
-                    }
-                    input.value = "";
-                    return;
                 }
+                ws.send(JSON.stringify({ Action: "send_command", Command: rawText }));
+                input.value = "";
+                return;
+            }
+
+            if (activeTab === "General") {
                 ws.send(JSON.stringify({ Action: "send_radio_message", Message: rawText }));
             } else {
                 ws.send(JSON.stringify({ Action: "send_private_message", To: activeTab, Message: rawText }));
