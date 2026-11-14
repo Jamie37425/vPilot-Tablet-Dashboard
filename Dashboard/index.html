@@ -893,8 +893,17 @@
         }
 
         function connect() {
-            // Dynamically connects using the PC IP address from the tablet browser URL
-            ws = new WebSocket("ws://" + window.location.hostname + ":9090");
+            // Dynamically connects using the PC IP address from the browser URL, falling back to localhost for file:// opens
+            const wsHost = window.location.hostname || "localhost";
+            try {
+                ws = new WebSocket("ws://" + wsHost + ":9090");
+            } catch (err) {
+                console.error("WebSocket connection init error:", err);
+                document.getElementById("connection-status").innerText = "Connection failed. Retrying...";
+                document.getElementById("connection-status").style.color = "#ff3333";
+                setTimeout(connect, 3000);
+                return;
+            }
 
             ws.onopen = () => {
                 document.getElementById("connection-status").innerText = "Connected to vPilot.";
