@@ -17,7 +17,7 @@ A lightweight, real-time web companion and **Multi-Device PTT** plugin for [vPil
 - **Controller 2-Button Action Bar**: Click any controller under **Controllers In Range** to open **Private Message** or **Request ATIS** right underneath that controller.
 - **Live Multi-Screen Sync**: Your PC browser, Virtual EFB, and physical tablet all stay synchronized in real time over WebSockets — COM1/COM2 TX & RX lights, PTT state, chat history, PM tabs, and PTT binds mirror automatically across every open client.
 - **Zero External Dependencies**: Built-in web server (port `8085`) and WebSocket server (port `9090`) start automatically when vPilot opens and close cleanly when vPilot exits — no Python or manual launcher needed.
-- **Works Directly or Over LAN**: Automatically uses `window.location.hostname` on tablets (`http://<YOUR-PC-IP>:8085`), `http://localhost:8085` on PC / Virtual EFB, and falls back to `localhost` even if `Dashboard/index.html` is opened directly (`file://`).
+- **Works Directly or Over LAN**: Automatically uses `window.location.hostname` on Virtual EFB (Android) and tablets (`http://<YOUR-PC-IP>:8085`), `http://localhost:8085` on the simulator PC, and falls back to `localhost` even if `Dashboard/index.html` is opened directly (`file://`).
 
 ---
 
@@ -48,7 +48,12 @@ A lightweight, real-time web companion and **Multi-Device PTT** plugin for [vPil
 ### Option A: 1-Click Install (Recommended)
 
 1. Extract the **entire** downloaded ZIP archive to any folder (e.g., `Documents\vPilot-Tablet-Dashboard-v1.2`).
+   - **Tip:** Before extracting, right-click the downloaded `.zip` file → **Properties** → under **Security**, check **Unblock** → **Apply** → **OK**. This prevents Windows Smart App Control from blocking `Install.bat`.
 2. Double-click **`Install.bat`** inside the extracted folder.
+   - **If Windows Smart App Control says** *"Smart App Control blocked a file that may be unsafe"* / *"This file was blocked because files of this type from the internet can be dangerous"*:
+     1. Right-click `Install.bat` and select **Properties**.
+     2. At the bottom of the **General** tab, under **Security**, check **Unblock**.
+     3. Click **Apply** → **OK**, then run `Install.bat` again.
    - *(If Windows Defender SmartScreen appears, click **More info** → **Run anyway**).*
    - `Install.bat` automatically closes vPilot if running, removes Windows *"Mark of the Web"* security locks, copies all 3 required DLLs (`vPilotTabletMirror.dll`, `Fleck.dll`, `Newtonsoft.Json.dll`) into `%LOCALAPPDATA%\vPilot\Plugins`, configures `dashboard_path.txt`, and prints your tablet URL.
    - **No manual `.dll` copying is needed** when using `Install.bat` — continue straight to **Connect Your Devices** below.
@@ -56,7 +61,7 @@ A lightweight, real-time web companion and **Multi-Device PTT** plugin for [vPil
 ### Option B: Manual Installation *(Skip if you ran `Install.bat`)*
 
 > [!IMPORTANT]
-> **Windows Security Block Notice:** Only follow Option B if you prefer not to run `Install.bat`. Windows blocks `.dll` files downloaded from the internet. Before copying manually, right-click the `.zip` (or each `.dll`) → **Properties** → check **Unblock** → **Apply** → **OK**.
+> **Windows Security Block Notice:** Only follow Option B if you prefer not to run `Install.bat`. Windows blocks `.dll` and `.bat` files downloaded from the internet. Before copying or running manually, right-click the `.zip` (or each `.dll` and `.bat` file) → **Properties** → check **Unblock** → **Apply** → **OK**.
 
 1. Close **vPilot** if running.
 2. Press `Win + R`, paste `%LOCALAPPDATA%\vPilot\Plugins`, and press **Enter**.
@@ -64,7 +69,11 @@ A lightweight, real-time web companion and **Multi-Device PTT** plugin for [vPil
    - `vPilotTabletMirror.dll`
    - `Fleck.dll`
    - `Newtonsoft.Json.dll`
-4. *(Optional)* Create `dashboard_path.txt` inside `%LOCALAPPDATA%\vPilot\Plugins\` containing the path to your `Dashboard` folder. *(Even without it, `vPilotTabletMirror.dll` already contains the full dashboard UI embedded inside.)*
+4. *(Optional)* Place the `Dashboard/` folder anywhere (e.g. `Documents`).
+   - **No Python needed with vPilot:** When vPilot starts, the plugin's built-in HTTP (`8085`) and WebSocket (`9090`) servers start automatically for both PC and external Android/tablet devices.
+   - **Using on PC only:** You can double-click `Dashboard/index.html` directly in your browser, or open `http://localhost:8085` while vPilot is running.
+   - **Optional standalone launcher (without vPilot running):** Run `Dashboard/Launch_Dashboard.bat` (requires Python; unblock via **Properties → Unblock** if Smart App Control blocks it).
+   - *(Optional)* Create `dashboard_path.txt` inside `%LOCALAPPDATA%\vPilot\Plugins\` containing the path to your `Dashboard` folder. *(Even without it, `vPilotTabletMirror.dll` already contains the full dashboard UI embedded inside.)*
 
 ---
 
@@ -72,12 +81,12 @@ A lightweight, real-time web companion and **Multi-Device PTT** plugin for [vPil
 
 1. Start **vPilot** and wait 10–15 seconds for its initial startup scan to finish. The built-in HTTP (`8085`) and WebSocket (`9090`) servers start automatically.
 2. Open the dashboard wherever you want it:
-   - **On your PC Browser or inside [Virtual EFB](https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph):**
+   - **On your PC Browser:**
      ```
      http://localhost:8085
      ```
      *(Or double-click `Dashboard/index.html` directly — it automatically connects to `ws://localhost:9090`.)*
-   - **On an iPad, Android Tablet, or Phone (Same Wi-Fi):**
+   - **On [Virtual EFB](https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph) (Android App) or an iPad, Android Tablet, or Phone (Same Wi-Fi):**
      1. Open Command Prompt on your PC, run `ipconfig`, and note your **IPv4 Address** (for example `192.168.1.50` — or copy the address shown by `Install.bat`).
      2. Open your tablet browser and go to:
         ```
@@ -95,7 +104,7 @@ All open sessions (PC browser, Virtual EFB, and tablet) mirror vPilot and stay s
 1. Click **`Binds`** next to the **PTT (Push to Talk)** button.
 2. Click **`+ Add Stick / Yoke / Key PTT`**, then press the PTT trigger on your **stick** (e.g., Airbus sidestick).
 3. Repeat once for your **yoke** (or any throttle button / keyboard key / mouse button).
-4. Both stay active at the same time in the background whenever **vPilot** is running — you do **not** need to keep the dashboard browser open, and you don't even need a PTT key bound in vPilot's own settings.
+4. Once your PTTs are set up, they are saved locally (`ptt_bindings.json`) and stay active at the same time in the background whenever **vPilot** is running — there is **no need to open the dashboard browser again**, and you don't even need a PTT key bound in vPilot's own settings.
 
 ### Radio, Dot-Commands, Private Messages & ATIS
 - **Send Radio Text:** Select the **General / ATIS** tab, type your message, and press **Enter** or **Send** to transmit on your active COM TX frequency.
@@ -143,7 +152,7 @@ vPilot-Tablet-Dashboard/
 
 - **Stuck on *"Connecting to vPilot mirror..."*:**
   - Confirm **vPilot** is running and wait 10–15 seconds for its initial simulator scan.
-  - Use **`http://localhost:8085`** on PC / Virtual EFB (or `http://<YOUR-PC-IP>:8085` on a tablet). If opening `Dashboard/index.html` directly from disk, make sure you're on **v1.2+**.
+  - Use **`http://localhost:8085`** on PC (or `http://<YOUR-PC-IP>:8085` on Virtual EFB / tablet). If opening `Dashboard/index.html` directly from disk, make sure you're on **v1.2+**.
   - If you installed manually without `Install.bat`, unblock all 3 `.dll` files in `%LOCALAPPDATA%\vPilot\Plugins\` (**Properties → Unblock → OK**) and restart vPilot.
 - **Tablet cannot connect over Wi-Fi:**
   - Ensure both PC and tablet are on the same Wi-Fi/LAN (not a guest network with client isolation).

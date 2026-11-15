@@ -79,17 +79,17 @@ echo  Next steps:
 echo   1. Start vPilot (the web dashboard server starts automatically - no Python needed!).
 echo   2. Connect using your browser:
 echo.
-echo      * Virtual EFB / Same PC:
+echo      * Same PC Browser:
 echo        http://localhost:8085
 echo.
 if defined LOCAL_IP goto :show_ip
-echo      * Physical Tablet / iPad / Phone (Same Wi-Fi):
+echo      * Virtual EFB (Android) / Physical Tablet / iPad / Phone (Same Wi-Fi):
 echo        Run "ipconfig" to find your IPv4 address, then open:
 echo        http://^<YOUR-PC-IP^>:8085
 goto :after_ip
 
 :show_ip
-echo      * Physical Tablet / iPad / Phone (Same Wi-Fi):
+echo      * Virtual EFB (Android) / Physical Tablet / iPad / Phone (Same Wi-Fi):
 echo        http://%LOCAL_IP%:8085
 
 :after_ip

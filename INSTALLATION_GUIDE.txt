@@ -1,0 +1,138 @@
+﻿========================================================================
+             vPilot Tablet Dashboard & Virtual EFB Mirror
+                             Version 1.2
+========================================================================
+
+A lightweight web companion for vPilot (VATSIM). View active controllers,
+monitor COM1/COM2 frequencies with realistic RX/TX status, bind multiple
+sticks/yokes/keys simultaneously for Push-To-Talk (PTT), send/receive
+radio and private text messages, request ATIS, and auto-sync your
+connected callsign — with ZERO external dependencies (no Python needed!).
+
+The built-in web server (port 8085) and WebSocket server (port 9090)
+start automatically whenever vPilot opens and close automatically when
+vPilot closes.
+
+Works on:
+- Any physical iPad, Android tablet, phone, or laptop browser
+- Inside Virtual EFB: https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph
+
+------------------------------------------------------------------------
+                 OPTION A: 1-CLICK INSTALL (RECOMMENDED)
+------------------------------------------------------------------------
+
+1. Extract this ENTIRE ZIP folder (not just one file) to any folder
+   (e.g. your Documents folder).
+   * TIP: Before extracting, right-click the downloaded .zip file ->
+     Properties -> under "Security", check "Unblock" -> Apply -> OK.
+     This prevents Windows Smart App Control from blocking Install.bat.
+2. Double-click "Install.bat" inside the extracted folder.
+   - If Windows Smart App Control says "Smart App Control blocked a file
+     that may be unsafe" / "This file was blocked because files of this
+     type from the internet can be dangerous":
+       1. Right-click "Install.bat" and select "Properties".
+       2. At the bottom of the "General" tab, under "Security", check
+          "Unblock".
+       3. Click "Apply" -> "OK", then run "Install.bat" again.
+   - If Windows Defender SmartScreen appears, click "More info" ->
+     "Run anyway".
+3. Install.bat automatically unblocks all files from Windows security,
+   copies all 3 required DLLs into %LOCALAPPDATA%\vPilot\Plugins, and
+   displays your connection URL.
+   * No manual DLL copying is required — skip to HOW TO CONNECT below!
+
+------------------------------------------------------------------------
+      OPTION B: MANUAL INSTALLATION (SKIP IF YOU RAN INSTALL.BAT)
+------------------------------------------------------------------------
+
+*** IMPORTANT WINDOWS SECURITY NOTICE ***
+Only follow Option B if you prefer installing manually instead of running
+Install.bat. When you download .dll or .bat files from the internet,
+Windows blocks them with "Mark of the Web". Before copying or running
+them manually, you MUST:
+Right-click the downloaded .zip (or each .dll and .bat file) ->
+Properties -> under "Security", check "Unblock" -> Apply -> OK.
+Otherwise vPilot will be blocked from loading and Smart App Control will
+block Launch_Dashboard.bat!
+
+1. Close vPilot if it is currently running.
+2. Press Windows Key + R, paste the following path, and press Enter:
+   %LOCALAPPDATA%\vPilot\Plugins
+   (This opens C:\Users\<YourUser>\AppData\Local\vPilot\Plugins)
+3. Copy all 3 unblocked files from the "Plugin" folder into this folder:
+   - vPilotTabletMirror.dll
+   - Fleck.dll
+   - Newtonsoft.Json.dll
+4. Place the "Dashboard" folder anywhere (e.g. Documents).
+   * Note: When vPilot starts, the plugin's built-in web server (port
+     8085) and WebSocket server (port 9090) start automatically — no
+     Python is required!
+   * Using on PC only: You can open "Dashboard\index.html" directly in
+     your browser, or go to http://localhost:8085 while vPilot is open.
+   * Using an external tablet / Virtual EFB without vPilot's built-in
+     server: Run "Dashboard\Launch_Dashboard.bat" to host the Dashboard
+     folder on port 8085 (requires Python to be installed; unblock it via
+     Properties -> Unblock if Smart App Control blocks it).
+
+------------------------------------------------------------------------
+                            HOW TO CONNECT
+------------------------------------------------------------------------
+
+1. Start vPilot. Wait 10-15 seconds for its initial simulator scan to
+   finish — the dashboard web server (port 8085) and WebSocket (port
+   9090) start automatically in the background!
+
+A) ON THE SAME PC (Second Monitor):
+   - Navigate to:
+     http://localhost:8085
+   - (PC only alternative: double-click "Dashboard\index.html" to open
+     it directly in your browser — it connects to localhost:9090.)
+
+B) ON VIRTUAL EFB (Android) OR A PHYSICAL TABLET / IPAD / PHONE (Same Wi-Fi):
+   1. On your PC, open Command Prompt, type "ipconfig", and press Enter
+      (or check the IP shown when Install.bat finished).
+   2. Note your "IPv4 Address" (e.g., 192.168.1.50).
+   3. In Virtual EFB or your tablet browser, navigate to:
+      http://<YOUR-PC-IP>:8085   (e.g., http://192.168.1.50:8085)
+
+------------------------------------------------------------------------
+         MULTI-DEVICE PTT, MESSAGING & CONTROLLER CONTROLS
+------------------------------------------------------------------------
+- Multi-Device PTT (Stick + Yoke + Key): Click "Binds" next to the PTT
+  button -> "+ Add Stick / Yoke / Key PTT" and press your stick/yoke
+  trigger button or keyboard key. Bind multiple controllers at once —
+  once your PTTs are set up, they are saved locally (ptt_bindings.json)
+  and stay active silently whenever vPilot runs, so there is no need to
+  open the browser again!
+- Send Radio Text: Type in the General / ATIS input bar and press Enter
+  or Send to transmit on your active COM TX frequency.
+- vPilot Dot-Commands: Run .ctaf KJFK, .wx KJFK / .metar KJFK, .atis
+  CALLSIGN, .com1 124.850, .x 2200, .wallop, .clear, or .msg / .chat /
+  .message CALLSIGN right from any PC or tablet browser — replies mirror
+  live in General / ATIS.
+- Private Messages: Click any controller in Controllers In Range to open
+  the 2-button bar (Private Message | Request ATIS), or type
+  ".msg CALLSIGN message" / ".message CALLSIGN" in General / ATIS.
+- Request ATIS: Click any controller and tap Request ATIS to view their
+  VATSIM ATIS in the General / ATIS tab.
+
+------------------------------------------------------------------------
+                              UNINSTALLING
+------------------------------------------------------------------------
+
+This plugin does not modify the Windows Registry or install background
+services. To uninstall it:
+
+1. Close vPilot so the plugin files are not in use.
+2. Press Windows Key + R, paste %LOCALAPPDATA%\vPilot\Plugins, and press
+   Enter.
+3. Delete ONLY the files installed/created by this plugin:
+   - vPilotTabletMirror.dll
+   - Fleck.dll
+   - Newtonsoft.Json.dll
+   - dashboard_path.txt
+   - ptt_bindings.json (optional — stores your saved Multi-PTT bindings)
+   * Do NOT delete the entire Plugins folder if you have other vPilot
+     plugins installed there.
+4. (Optional) Delete this extracted folder.
+========================================================================
