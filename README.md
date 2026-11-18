@@ -3,16 +3,18 @@
 A lightweight, real-time web companion and **Multi-Device PTT** plugin for [vPilot](https://vpilot.rosscarlson.dev/) (VATSIM pilot client). Control COM1/COM2 frequencies, send and receive radio & private messages, inspect controller ATIS, and bind **multiple flight sticks, yokes, and keyboard keys** as Push-To-Talk at the same time — all synced live across your PC browser, iPad/Android tablet, phone, or [Virtual EFB](https://flightsim.to/addon/118791/virtual-efb-electronic-flight-bag-for-android-pc-checklists-wind-calc-simbrief-navigraph).
 
 <p align="center">
-  <img src="screenshots/controller-actions-radio-chat.jpg" alt="vPilot Tablet Dashboard v1.2 Preview" width="850">
+  <img src="screenshots/controller-actions-radio-chat.jpg" alt="vPilot Tablet Dashboard v1.3 Preview" width="850">
 </p>
 
 ---
 
 ## ✨ What's Included
 
-- **Multi-Device & Keybind PTT**: Bind multiple controllers simultaneously (such as an Airbus sidestick **and** a Boeing/Cessna yoke, throttle switches, or keyboard/mouse keys) with one press inside the **Binds** panel. No more changing vPilot's single PTT setting when swapping aircraft or hardware.
-  - Works **silently inside vPilot** whenever vPilot is open — **even when the dashboard browser is closed**.
-  - Saved persistently to `%LOCALAPPDATA%\vPilot\Plugins\ptt_bindings.json` and skips held toggle switches cleanly when binding.
+- **Remote Connect, Mode C & Ident Controls**: Connect or disconnect from VATSIM, toggle transponder **Mode C** (synced two-way with vPilot and cockpit transponders), and squawk **Ident** directly from your PC browser, tablet, or Virtual EFB.
+- **Connect to VATSIM Modal & Searchable Aircraft Model Picker**: Pre-fills Callsign, Aircraft Type ICAO, SELCAL, and Observer Mode, adds an instant searchable aircraft model dropdown (`10,300+` models from vPilot's database), and syncs entries two-way with vPilot's native Connect dialog.
+- **Multi-Device & Keybind PTT (With Hardware-Safe Isolation & Live Toggle)**: Bind multiple controllers simultaneously (such as an Airbus sidestick **and** a Boeing/Cessna yoke, throttle switches, or keyboard/mouse keys) with one press inside the **Binds** panel.
+  - Uses DirectInput `Background | NonExclusive` mode on **only** bound controllers during flight so other flight hardware (`TCA Quadrant`, rudders, etc.) stays untouched, and includes a live **Enable Multi-Device Hardware PTT** toggle inside the **Binds** modal.
+  - Works **silently inside vPilot** whenever vPilot is open — **even when the dashboard browser is closed** — and saves persistently to `%LOCALAPPDATA%\vPilot\Plugins\ptt_bindings.json`.
 - **Two-Way Radio, Dot-Commands & Private Messaging**: Type and send radio text messages on your active COM TX frequency from **General / ATIS**, run native vPilot dot-commands (`.ctaf KJFK`, `.wx ICAO` / `.metar ICAO`, `.atis CALLSIGN`, `.com1`/`.com2`, `.x`/`.sq`, `.wallop`, `.clear`), reply inside private message tabs, or start a PM anytime using `.msg`, `.chat`, or `.message CALLSIGN [text]`. Command replies (CTAF frequencies, METARs, ATIS, and system notices) mirror back live to all open screens, and incoming PMs on inactive tabs show a glowing unread indicator.
 - **Controller 2-Button Action Bar**: Click any controller under **Controllers In Range** to open **Private Message** or **Request ATIS** right underneath that controller.
 - **Live Multi-Screen Sync**: Your PC browser, Virtual EFB, and physical tablet all stay synchronized in real time over WebSockets — COM1/COM2 TX & RX lights, PTT state, chat history, PM tabs, and PTT binds mirror automatically across every open client.
@@ -47,7 +49,7 @@ A lightweight, real-time web companion and **Multi-Device PTT** plugin for [vPil
 
 ### Option A: 1-Click Install (Recommended)
 
-1. Extract the **entire** downloaded ZIP archive to any folder (e.g., `Documents\vPilot-Tablet-Dashboard-v1.2`).
+1. Extract the **entire** downloaded ZIP archive to any folder (e.g., `Documents\vPilot-Tablet-Dashboard-v1.3`).
    - **Tip:** Before extracting, right-click the downloaded `.zip` file → **Properties** → under **Security**, check **Unblock** → **Apply** → **OK**. This prevents Windows Smart App Control from blocking `Install.bat`.
 2. Double-click **`Install.bat`** inside the extracted folder.
    - **If Windows Smart App Control says** *"Smart App Control blocked a file that may be unsafe"* / *"This file was blocked because files of this type from the internet can be dangerous"*:
@@ -100,11 +102,16 @@ All open sessions (PC browser, Virtual EFB, and tablet) mirror vPilot and stay s
 
 ## 🎮 How to Use
 
+### Remote Connect, Mode C & Ident
+1. Click **`Connect`** in the top header to open the **Connect to VATSIM** dialog (pre-filled with your last Callsign, Aircraft Type ICAO, SELCAL, and Observer Mode).
+2. Type any ICAO code or aircraft manufacturer/model name (e.g. `A318` or `Airbus`) to filter and select from vPilot's aircraft model catalog.
+3. While connected, use **`Mode C`** (green when active) and **`Ident`** (blue flash) directly from any synced screen, or click teal **`Disconnect`** when finished.
+
 ### Multi-Device PTT Setup (Stick + Yoke + Keys)
 1. Click **`Binds`** next to the **PTT (Push to Talk)** button.
 2. Click **`+ Add Stick / Yoke / Key PTT`**, then press the PTT trigger on your **stick** (e.g., Airbus sidestick).
 3. Repeat once for your **yoke** (or any throttle button / keyboard key / mouse button).
-4. Once your PTTs are set up, they are saved locally (`ptt_bindings.json`) and stay active at the same time in the background whenever **vPilot** is running — there is **no need to open the dashboard browser again**, and you don't even need a PTT key bound in vPilot's own settings.
+4. Once your PTTs are set up, they are saved locally (`ptt_bindings.json`) and stay active at the same time in the background whenever **vPilot** is running — there is **no need to open the dashboard browser again**, you don't need a PTT key bound in vPilot's settings, and you can pause hardware PTT anytime with the **Enable Multi-Device Hardware PTT** toggle.
 
 ### Radio, Dot-Commands, Private Messages & ATIS
 - **Send Radio Text:** Select the **General / ATIS** tab, type your message, and press **Enter** or **Send** to transmit on your active COM TX frequency.

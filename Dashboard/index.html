@@ -286,6 +286,39 @@
             color: #a6b0bc;
             line-height: 1.45;
         }
+        .ptt-master-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 10px;
+            background: #21252b;
+            border: 1px solid #353b44;
+            border-radius: 6px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .ptt-master-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #f0f0f0;
+        }
+        .ptt-master-left input {
+            width: 16px;
+            height: 16px;
+            accent-color: #00a2ff;
+            cursor: pointer;
+        }
+        .ptt-master-status {
+            font-size: 11px;
+            color: #4bb543;
+        }
+        .ptt-master-status.paused {
+            color: #9aa4b2;
+        }
         .ptt-capture-controls {
             display: flex;
             gap: 8px;
@@ -556,24 +589,82 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
             margin-bottom: 10px;
             padding-bottom: 8px;
             border-bottom: 1px solid #333;
         }
+        .net-controls {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+        .net-btn {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: #d8d8d8;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 11px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+            white-space: nowrap;
+        }
+        .net-btn:hover:not(:disabled) {
+            background: #353535;
+            border-color: #666;
+            color: #ffffff;
+        }
+        .net-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        #connect-btn.connecting {
+            background: #4b3d18;
+            border-color: #b8860b;
+            color: #ffd700;
+        }
+        #connect-btn.connected {
+            background: #0d9488;
+            border-color: #14b8a6;
+            color: #ffffff;
+            box-shadow: 0 0 8px rgba(13, 148, 136, 0.4);
+        }
+        #connect-btn.connected:hover:not(:disabled) {
+            background: #0f766e;
+            border-color: #2dd4bf;
+        }
+        #modec-btn.active {
+            background: #2e8b57;
+            border-color: #3cb371;
+            color: #ffffff;
+            box-shadow: 0 0 8px rgba(46, 139, 87, 0.45);
+        }
+        #ident-btn.active {
+            background: #00a2ff;
+            border-color: #4daafc;
+            color: #ffffff;
+            box-shadow: 0 0 8px rgba(0, 162, 255, 0.65);
+        }
         .status-indicator {
             font-size: 12px;
             color: #888;
-            flex: 1;
+            white-space: nowrap;
         }
         .callsign-display {
             font-size: 24px;
             font-weight: bold;
             color: #ffffff;
-            flex: 1;
+            flex: 0 1 auto;
             text-align: center;
             cursor: pointer;
             letter-spacing: 1px;
             transition: color 0.2s;
+            padding: 0 8px;
         }
         .callsign-display:hover {
             color: #4daafc;
@@ -582,7 +673,157 @@
             flex: 1;
             display: flex;
             justify-content: flex-end;
-            gap: 6px;
+            align-items: center;
+            gap: 8px;
+        }
+        .connect-modal {
+            width: min(420px, 94vw);
+        }
+        .connect-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .connect-label {
+            font-size: 12px;
+            color: #bbb;
+            font-weight: 600;
+        }
+        .connect-input {
+            background: #141414;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            color: #ffffff;
+            padding: 9px 11px;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            text-transform: uppercase;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .connect-input:focus {
+            border-color: #00a2ff;
+            box-shadow: 0 0 6px rgba(0, 162, 255, 0.35);
+        }
+        .connect-input:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .connect-checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ddd;
+            cursor: pointer;
+            user-select: none;
+            margin-top: 2px;
+        }
+        .connect-checkbox-row input {
+            width: 16px;
+            height: 16px;
+            accent-color: #00a2ff;
+            cursor: pointer;
+        }
+        .connect-error {
+            display: none;
+            padding: 8px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            background: #3a1a1a;
+            border: 1px solid #9b2c2c;
+            color: #ffb4b4;
+        }
+        .connect-error.visible {
+            display: block;
+        }
+        .connect-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        .connect-submit-btn {
+            background: #173a5e;
+            border: 1px solid #00a2ff;
+            color: #ffffff;
+            border-radius: 4px;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .connect-submit-btn:hover {
+            background: #1e4d7b;
+        }
+        .connect-cancel-btn {
+            background: #2a2a2a;
+            border: 1px solid #555;
+            color: #ddd;
+            border-radius: 4px;
+            padding: 8px 14px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .connect-cancel-btn:hover {
+            background: #383838;
+        }
+        .connect-modal,
+        .connect-modal .ptt-modal-body {
+            overflow: visible;
+        }
+        .type-autocomplete {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+        .type-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            max-height: 210px;
+            overflow-y: auto;
+            background: #141414;
+            border: 1px solid #00a2ff;
+            border-radius: 5px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.85);
+            z-index: 2500;
+        }
+        .type-dropdown.open {
+            display: block;
+        }
+        .type-option {
+            padding: 8px 11px;
+            font-size: 13px;
+            color: #e6e6e6;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid #222;
+        }
+        .type-option:last-child {
+            border-bottom: none;
+        }
+        .type-option:hover,
+        .type-option.active {
+            background: rgba(0, 162, 255, 0.24);
+            color: #ffffff;
+        }
+        .type-option-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .type-option-code {
+            flex-shrink: 0;
+            font-weight: bold;
+            color: #4daafc;
+            font-size: 12px;
         }
         .sb-btn {
             background: #2a2a2a;
@@ -784,10 +1025,15 @@
 
     <div class="main-content">
         <div class="header-bar">
-            <div id="connection-status" class="status-indicator">Connecting to vPilot mirror...</div>
+            <div class="net-controls">
+                <button type="button" id="connect-btn" class="net-btn" onclick="handleConnectClick()" title="Connect to or Disconnect from VATSIM">Connect</button>
+                <button type="button" id="modec-btn" class="net-btn" onclick="toggleModeC()" title="Toggle Transponder Mode C (Altitude Reporting)" disabled>Mode C</button>
+                <button type="button" id="ident-btn" class="net-btn" onclick="triggerIdent()" title="Squawk Ident" disabled>Ident</button>
+            </div>
             <div id="user-callsign" class="callsign-display" onclick="handleCallsignClick()" title="Connected VATSIM Callsign (or tap to edit)">CALLSIGN</div>
             <div class="header-spacer">
-                <button class="sb-btn clear-btn" onclick="clearMessages()">Clear</button>
+                <div id="connection-status" class="status-indicator">Connecting to vPilot mirror...</div>
+                <button type="button" class="sb-btn clear-btn" onclick="clearMessages()">Clear</button>
             </div>
         </div>
         
@@ -814,8 +1060,15 @@
             </div>
             <div class="ptt-modal-body">
                 <div class="ptt-help-text">
-                    Bind your Airbus sidestick, Boeing/Cessna yoke, throttle, or keyboard keys all at once. Press any bound button anytime while vPilot is running to transmit — no hardware switching required.
+                    Bind your Airbus sidestick, Boeing/Cessna yoke, throttle, or keyboard keys all at once. Only bound devices are accessed during flight.
                 </div>
+                <label class="ptt-master-row" for="ptt-hardware-enabled">
+                    <span class="ptt-master-left">
+                        <input type="checkbox" id="ptt-hardware-enabled" checked onchange="setHardwarePttEnabled(this.checked)" />
+                        <span>Enable Multi-Device Hardware PTT</span>
+                    </span>
+                    <span id="ptt-master-status" class="ptt-master-status">Active</span>
+                </label>
                 <div class="ptt-capture-controls">
                     <button type="button" id="ptt-add-btn" class="ptt-add-btn" onclick="startPttCapture()">+ Add Stick / Yoke / Key PTT</button>
                     <button type="button" id="ptt-cancel-btn" class="ptt-cancel-btn" onclick="cancelPttCapture()">Cancel</button>
@@ -833,6 +1086,41 @@
         </div>
     </div>
 
+    <div id="connect-modal-backdrop" class="ptt-modal-backdrop" onclick="if (event.target === this) closeConnectModal()">
+        <div class="ptt-modal connect-modal">
+            <div class="ptt-modal-header">
+                <div class="ptt-modal-title">Connect to VATSIM</div>
+                <button type="button" class="ptt-modal-close" onclick="closeConnectModal()" title="Close">&times;</button>
+            </div>
+            <form class="ptt-modal-body" onsubmit="event.preventDefault(); submitConnectModal();">
+                <div class="connect-field">
+                    <label class="connect-label" for="connect-callsign">Callsign</label>
+                    <input type="text" id="connect-callsign" class="connect-input" placeholder="e.g. EZY123" maxlength="12" autocomplete="off" required />
+                </div>
+                <div class="connect-field">
+                    <label class="connect-label" for="connect-type">Aircraft Type Code (ICAO)</label>
+                    <div class="type-autocomplete">
+                        <input type="text" id="connect-type" class="connect-input" placeholder="ICAO or model (e.g. A320, Airbus, B738)" maxlength="40" autocomplete="off" />
+                        <div id="connect-type-dropdown" class="type-dropdown" role="listbox"></div>
+                    </div>
+                </div>
+                <div class="connect-field">
+                    <label class="connect-label" for="connect-selcal">SELCAL Code (Optional)</label>
+                    <input type="text" id="connect-selcal" class="connect-input" placeholder="e.g. AB-CD" maxlength="5" autocomplete="off" />
+                </div>
+                <label class="connect-checkbox-row" for="connect-observer">
+                    <input type="checkbox" id="connect-observer" onchange="syncObserverTypeState()" />
+                    <span>Connect in Observer Mode</span>
+                </label>
+                <div id="connect-error-box" class="connect-error"></div>
+                <div class="connect-actions">
+                    <button type="button" class="connect-cancel-btn" onclick="closeConnectModal()">Cancel</button>
+                    <button type="submit" id="connect-submit-btn" class="connect-submit-btn">Connect</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         let ws;
         let activeTab = 'General';
@@ -840,8 +1128,23 @@
         let com1FreqStr = '122.800';
         let com2FreqStr = '121.500';
         let expandedController = null;
-        let pttState = { Bindings: [], Devices: [], ActiveIds: [], IsCapturing: false };
+        let pttState = { Bindings: [], Devices: [], ActiveIds: [], IsCapturing: false, HardwarePttEnabled: true };
         let pttCaptureBanner = { status: '', message: '' };
+        let networkState = {
+            IsConnected: false,
+            IsConnecting: false,
+            ModeC: false,
+            IdentActive: false,
+            Callsign: '',
+            TypeCode: '',
+            SelcalCode: '',
+            ObserverMode: false
+        };
+        let connectModalDirty = false;
+        let aircraftTypesCache = null;
+        let aircraftTypesLoading = false;
+        let typeDropdownMatches = [];
+        let typeDropdownActiveIndex = -1;
         
         document.addEventListener("DOMContentLoaded", () => {
             let savedCallsign = localStorage.getItem("vPilotCallsign");
@@ -908,6 +1211,7 @@
             ws.onopen = () => {
                 document.getElementById("connection-status").innerText = "Connected to vPilot.";
                 document.getElementById("connection-status").style.color = "#4bb543";
+                renderNetworkControls();
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ Action: "get_state" }));
                 }
@@ -916,6 +1220,7 @@
             ws.onclose = () => {
                 document.getElementById("connection-status").innerText = "Disconnected. Reconnecting...";
                 document.getElementById("connection-status").style.color = "#ff3333";
+                renderNetworkControls();
                 setTimeout(connect, 3000);
             };
 
@@ -986,7 +1291,8 @@
                         Bindings: Array.isArray(data.Bindings) ? data.Bindings : [],
                         Devices: Array.isArray(data.Devices) ? data.Devices : [],
                         ActiveIds: Array.isArray(data.ActiveIds) ? data.ActiveIds : [],
-                        IsCapturing: !!data.IsCapturing
+                        IsCapturing: !!data.IsCapturing,
+                        HardwarePttEnabled: data.HardwarePttEnabled !== false
                     };
                     renderPttModal();
                 }
@@ -997,6 +1303,45 @@
                         message: data.Message || ''
                     };
                     renderPttModal();
+                }
+                else if (data.Type === "NetworkStatus") {
+                    networkState = {
+                        IsConnected: !!data.IsConnected,
+                        IsConnecting: !!data.IsConnecting,
+                        ModeC: !!data.ModeC,
+                        IdentActive: !!data.IdentActive,
+                        Callsign: data.Callsign || '',
+                        TypeCode: data.TypeCode || '',
+                        SelcalCode: data.SelcalCode || '',
+                        ObserverMode: !!data.ObserverMode
+                    };
+                    renderNetworkControls();
+                    if (networkState.IsConnected) {
+                        if (networkState.Callsign) applyCallsign(networkState.Callsign);
+                        closeConnectModal();
+                    } else if (document.getElementById("connect-modal-backdrop")?.classList.contains("open") && !connectModalDirty) {
+                        populateConnectModalFields();
+                    }
+                }
+                else if (data.Type === "ConnectStatus") {
+                    if (data.Status === "Error") {
+                        const msg = data.Message || "Failed to connect to VATSIM.";
+                        showConnectError(msg);
+                        appendMessage("General", `[Connect Error] ${msg}`, "#ff6b6b");
+                    } else if (data.Status === "Connected") {
+                        showConnectError("");
+                        closeConnectModal();
+                    }
+                }
+                else if (data.Type === "AircraftTypes") {
+                    aircraftTypesLoading = false;
+                    if (Array.isArray(data.List)) {
+                        aircraftTypesCache = data.List;
+                        if (document.getElementById("connect-modal-backdrop")?.classList.contains("open") &&
+                            document.activeElement?.id === "connect-type") {
+                            filterAndRenderTypeDropdown();
+                        }
+                    }
                 }
             };
         }
@@ -1413,6 +1758,12 @@
             }
         }
 
+        function setHardwarePttEnabled(enabled) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "set_hardware_ptt_enabled", Enabled: !!enabled }));
+            }
+        }
+
         function removePttBinding(id) {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ Action: "remove_ptt_binding", Id: id }));
@@ -1423,15 +1774,24 @@
             const bindings = pttState.Bindings || [];
             const devices = pttState.Devices || [];
             const activeSet = new Set(pttState.ActiveIds || []);
+            const hwEnabled = pttState.HardwarePttEnabled !== false;
             const enabledCount = bindings.filter(b => b.Enabled !== false).length;
 
             const badgeEl = document.getElementById("ptt-bind-count");
-            if (badgeEl) badgeEl.innerText = enabledCount.toString();
+            if (badgeEl) badgeEl.innerText = hwEnabled ? enabledCount.toString() : "OFF";
+
+            const masterCb = document.getElementById("ptt-hardware-enabled");
+            const masterStatus = document.getElementById("ptt-master-status");
+            if (masterCb) masterCb.checked = hwEnabled;
+            if (masterStatus) {
+                masterStatus.innerText = hwEnabled ? "Active" : "Paused";
+                masterStatus.classList.toggle("paused", !hwEnabled);
+            }
 
             const addBtn = document.getElementById("ptt-add-btn");
             const cancelBtn = document.getElementById("ptt-cancel-btn");
             if (addBtn) {
-                addBtn.disabled = !!pttState.IsCapturing;
+                addBtn.disabled = !!pttState.IsCapturing || !hwEnabled;
                 addBtn.innerText = pttState.IsCapturing ? "Listening for Stick / Yoke / Key..." : "+ Add Stick / Yoke / Key PTT";
             }
             if (cancelBtn) {
@@ -1521,6 +1881,355 @@
             }
         }
 
+        function renderNetworkControls() {
+            const connectBtn = document.getElementById("connect-btn");
+            const modeCBtn = document.getElementById("modec-btn");
+            const identBtn = document.getElementById("ident-btn");
+            const socketReady = !!(ws && ws.readyState === WebSocket.OPEN);
+
+            if (connectBtn) {
+                connectBtn.disabled = !socketReady;
+                connectBtn.classList.toggle("connected", networkState.IsConnected);
+                connectBtn.classList.toggle("connecting", !networkState.IsConnected && networkState.IsConnecting);
+                if (networkState.IsConnected) {
+                    connectBtn.innerText = "Disconnect";
+                    connectBtn.title = "Disconnect from VATSIM";
+                } else if (networkState.IsConnecting) {
+                    connectBtn.innerText = "Connecting...";
+                    connectBtn.title = "Connecting to VATSIM...";
+                } else {
+                    connectBtn.innerText = "Connect";
+                    connectBtn.title = "Connect to VATSIM";
+                }
+            }
+
+            if (modeCBtn) {
+                modeCBtn.disabled = !socketReady || !networkState.IsConnected;
+                modeCBtn.classList.toggle("active", networkState.IsConnected && networkState.ModeC);
+            }
+
+            if (identBtn) {
+                identBtn.disabled = !socketReady || !networkState.IsConnected;
+                identBtn.classList.toggle("active", networkState.IsConnected && networkState.IdentActive);
+            }
+        }
+
+        function handleConnectClick() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            if (networkState.IsConnected) {
+                ws.send(JSON.stringify({ Action: "disconnect_vatsim" }));
+            } else {
+                openConnectModal();
+            }
+        }
+
+        function populateConnectModalFields() {
+            const savedCallsign = localStorage.getItem("vPilotCallsign") || "";
+            const callsignInput = document.getElementById("connect-callsign");
+            const typeInput = document.getElementById("connect-type");
+            const selcalInput = document.getElementById("connect-selcal");
+            const obsCheckbox = document.getElementById("connect-observer");
+
+            const initialCallsign = networkState.Callsign || (savedCallsign !== "CALLSIGN" ? savedCallsign : "");
+            if (callsignInput) callsignInput.value = initialCallsign;
+            if (typeInput) typeInput.value = networkState.TypeCode || "";
+            if (selcalInput) selcalInput.value = networkState.SelcalCode || "";
+            if (obsCheckbox) obsCheckbox.checked = !!networkState.ObserverMode;
+
+            syncObserverTypeState();
+        }
+
+        function loadAircraftTypes() {
+            if (aircraftTypesCache || aircraftTypesLoading) return;
+            aircraftTypesLoading = true;
+
+            if (window.location.protocol && window.location.protocol.startsWith("http")) {
+                fetch("/aircraft-types.json")
+                    .then(r => {
+                        if (!r.ok) throw new Error("HTTP " + r.status);
+                        return r.json();
+                    })
+                    .then(list => {
+                        aircraftTypesLoading = false;
+                        if (Array.isArray(list)) {
+                            aircraftTypesCache = list;
+                            if (document.activeElement?.id === "connect-type") {
+                                filterAndRenderTypeDropdown();
+                            }
+                        }
+                    })
+                    .catch(() => {
+                        aircraftTypesLoading = false;
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ Action: "get_aircraft_types" }));
+                        }
+                    });
+            } else if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "get_aircraft_types" }));
+            } else {
+                aircraftTypesLoading = false;
+            }
+        }
+
+        function findMatchingAircraftTypes(rawQuery) {
+            if (!Array.isArray(aircraftTypesCache) || aircraftTypesCache.length === 0) return [];
+            const q = (rawQuery || "").trim().toUpperCase();
+            if (!q) return [];
+
+            const tokens = q.split(/\s+/).filter(Boolean);
+            const exactCode = [];
+            const prefixCode = [];
+            const labelMatch = [];
+
+            for (let i = 0; i < aircraftTypesCache.length; i++) {
+                const entry = aircraftTypesCache[i];
+                const code = (entry[0] || "").toUpperCase();
+                const label = entry[1] || code;
+                const upperLabel = label.toUpperCase();
+
+                if (code === q) {
+                    exactCode.push(entry);
+                } else if (tokens.length === 1 && code.startsWith(q)) {
+                    prefixCode.push(entry);
+                } else if (tokens.every(tok => upperLabel.includes(tok))) {
+                    labelMatch.push(entry);
+                }
+
+                if (exactCode.length >= 40) break;
+            }
+
+            return exactCode.concat(prefixCode, labelMatch).slice(0, 40);
+        }
+
+        function renderTypeDropdown() {
+            const dropdown = document.getElementById("connect-type-dropdown");
+            if (!dropdown) return;
+
+            dropdown.innerHTML = "";
+            if (!typeDropdownMatches.length) {
+                dropdown.classList.remove("open");
+                typeDropdownActiveIndex = -1;
+                return;
+            }
+
+            typeDropdownMatches.forEach((entry, idx) => {
+                const code = entry[0] || "";
+                const label = entry[1] || code;
+                const displayName = label.endsWith(`(${code})`)
+                    ? label.slice(0, label.length - (`(${code})`).length).trim()
+                    : label;
+
+                const opt = document.createElement("div");
+                opt.className = "type-option" + (idx === typeDropdownActiveIndex ? " active" : "");
+                opt.setAttribute("role", "option");
+
+                const nameSpan = document.createElement("span");
+                nameSpan.className = "type-option-name";
+                nameSpan.innerText = displayName || code;
+
+                const codeSpan = document.createElement("span");
+                codeSpan.className = "type-option-code";
+                codeSpan.innerText = `(${code})`;
+
+                opt.appendChild(nameSpan);
+                opt.appendChild(codeSpan);
+
+                opt.addEventListener("mousedown", (e) => {
+                    e.preventDefault();
+                    selectAircraftType(code);
+                });
+
+                dropdown.appendChild(opt);
+            });
+
+            dropdown.classList.add("open");
+            if (typeDropdownActiveIndex >= 0) {
+                const activeEl = dropdown.children[typeDropdownActiveIndex];
+                if (activeEl) activeEl.scrollIntoView({ block: "nearest" });
+            }
+        }
+
+        function filterAndRenderTypeDropdown() {
+            const obsCheckbox = document.getElementById("connect-observer");
+            const typeInput = document.getElementById("connect-type");
+            if (!typeInput || (obsCheckbox && obsCheckbox.checked)) {
+                closeTypeDropdown();
+                return;
+            }
+            typeDropdownMatches = findMatchingAircraftTypes(typeInput.value);
+            typeDropdownActiveIndex = typeDropdownMatches.length > 0 ? 0 : -1;
+            renderTypeDropdown();
+        }
+
+        function selectAircraftType(code) {
+            const typeInput = document.getElementById("connect-type");
+            if (typeInput) {
+                typeInput.value = (code || "").trim().toUpperCase();
+                connectModalDirty = true;
+            }
+            closeTypeDropdown();
+        }
+
+        function closeTypeDropdown() {
+            const dropdown = document.getElementById("connect-type-dropdown");
+            if (dropdown) dropdown.classList.remove("open");
+            typeDropdownMatches = [];
+            typeDropdownActiveIndex = -1;
+        }
+
+        function openConnectModal() {
+            const backdrop = document.getElementById("connect-modal-backdrop");
+            if (!backdrop) return;
+
+            connectModalDirty = false;
+            closeTypeDropdown();
+            populateConnectModalFields();
+            showConnectError("");
+            backdrop.classList.add("open");
+            loadAircraftTypes();
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ Action: "get_state" }));
+            }
+
+            const callsignInput = document.getElementById("connect-callsign");
+            if (callsignInput) {
+                setTimeout(() => {
+                    callsignInput.focus();
+                    callsignInput.select();
+                }, 0);
+            }
+        }
+
+        document.getElementById("connect-modal-backdrop")?.addEventListener("input", () => {
+            connectModalDirty = true;
+        });
+        document.getElementById("connect-modal-backdrop")?.addEventListener("change", () => {
+            connectModalDirty = true;
+        });
+
+        (function setupTypeAutocomplete() {
+            const typeInput = document.getElementById("connect-type");
+            if (!typeInput) return;
+
+            typeInput.addEventListener("focus", () => {
+                loadAircraftTypes();
+                filterAndRenderTypeDropdown();
+            });
+            typeInput.addEventListener("input", () => {
+                filterAndRenderTypeDropdown();
+            });
+            typeInput.addEventListener("blur", () => {
+                setTimeout(closeTypeDropdown, 120);
+            });
+            typeInput.addEventListener("keydown", (e) => {
+                const dropdown = document.getElementById("connect-type-dropdown");
+                const isOpen = dropdown && dropdown.classList.contains("open") && typeDropdownMatches.length > 0;
+                if (!isOpen) return;
+
+                if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    typeDropdownActiveIndex = (typeDropdownActiveIndex + 1) % typeDropdownMatches.length;
+                    renderTypeDropdown();
+                } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    typeDropdownActiveIndex = (typeDropdownActiveIndex - 1 + typeDropdownMatches.length) % typeDropdownMatches.length;
+                    renderTypeDropdown();
+                } else if (e.key === "Enter" && typeDropdownActiveIndex >= 0) {
+                    e.preventDefault();
+                    selectAircraftType(typeDropdownMatches[typeDropdownActiveIndex][0]);
+                } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeTypeDropdown();
+                }
+            });
+        })();
+
+        function closeConnectModal() {
+            closeTypeDropdown();
+            const backdrop = document.getElementById("connect-modal-backdrop");
+            if (backdrop) backdrop.classList.remove("open");
+            showConnectError("");
+        }
+
+        function syncObserverTypeState() {
+            const obsCheckbox = document.getElementById("connect-observer");
+            const typeInput = document.getElementById("connect-type");
+            if (!obsCheckbox || !typeInput) return;
+            typeInput.disabled = obsCheckbox.checked;
+            if (obsCheckbox.checked) closeTypeDropdown();
+        }
+
+        function showConnectError(message) {
+            const errBox = document.getElementById("connect-error-box");
+            if (!errBox) return;
+            if (message) {
+                errBox.innerText = message;
+                errBox.classList.add("visible");
+            } else {
+                errBox.innerText = "";
+                errBox.classList.remove("visible");
+            }
+        }
+
+        function submitConnectModal() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                showConnectError("Not connected to vPilot WebSocket mirror.");
+                return;
+            }
+            const callsign = (document.getElementById("connect-callsign")?.value || "").trim().toUpperCase();
+            let typeCode = (document.getElementById("connect-type")?.value || "").trim().toUpperCase();
+            const parenMatch = typeCode.match(/\(([A-Z0-9]{2,8})\)\s*$/);
+            if (parenMatch) {
+                typeCode = parenMatch[1];
+            }
+            const selcalCode = (document.getElementById("connect-selcal")?.value || "").trim().toUpperCase();
+            const observerMode = !!document.getElementById("connect-observer")?.checked;
+
+            if (!callsign) {
+                showConnectError("Please enter a callsign.");
+                return;
+            }
+            if (!observerMode && !typeCode) {
+                showConnectError("Please enter an aircraft type code (e.g. A320, B738) or select Observer Mode.");
+                return;
+            }
+
+            closeTypeDropdown();
+            showConnectError("");
+            ws.send(JSON.stringify({
+                Action: "connect_vatsim",
+                Callsign: callsign,
+                TypeCode: typeCode,
+                SelcalCode: selcalCode,
+                ObserverMode: observerMode
+            }));
+        }
+
+        function toggleModeC() {
+            if (!ws || ws.readyState !== WebSocket.OPEN || !networkState.IsConnected) return;
+            ws.send(JSON.stringify({ Action: "toggle_mode_c" }));
+        }
+
+        function triggerIdent() {
+            if (!ws || ws.readyState !== WebSocket.OPEN || !networkState.IsConnected) return;
+            ws.send(JSON.stringify({ Action: "squawk_ident" }));
+        }
+
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+                const dropdown = document.getElementById("connect-type-dropdown");
+                if (dropdown?.classList.contains("open")) {
+                    closeTypeDropdown();
+                } else if (document.getElementById("connect-modal-backdrop")?.classList.contains("open")) {
+                    closeConnectModal();
+                } else if (document.getElementById("ptt-modal-backdrop")?.classList.contains("open")) {
+                    closePttModal();
+                }
+            }
+        });
+
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") {
                 if (!ws || ws.readyState === WebSocket.CLOSED) {
@@ -1531,6 +2240,7 @@
             }
         });
 
+        renderNetworkControls();
         connect();
     </script>
 </body>

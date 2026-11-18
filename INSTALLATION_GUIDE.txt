@@ -1,13 +1,15 @@
 ﻿========================================================================
              vPilot Tablet Dashboard & Virtual EFB Mirror
-                             Version 1.2
+                             Version 1.3
 ========================================================================
 
-A lightweight web companion for vPilot (VATSIM). View active controllers,
-monitor COM1/COM2 frequencies with realistic RX/TX status, bind multiple
-sticks/yokes/keys simultaneously for Push-To-Talk (PTT), send/receive
-radio and private text messages, request ATIS, and auto-sync your
-connected callsign — with ZERO external dependencies (no Python needed!).
+A lightweight web companion for vPilot (VATSIM). Connect/disconnect from
+VATSIM, pick your aircraft model from vPilot's catalog, toggle Mode C &
+Ident, view active controllers, monitor COM1/COM2 frequencies with
+realistic RX/TX status, bind multiple sticks/yokes/keys simultaneously
+for Push-To-Talk (PTT), send/receive radio and private text messages,
+run dot-commands, and request ATIS — with ZERO external dependencies
+(no Python needed!).
 
 The built-in web server (port 8085) and WebSocket server (port 9090)
 start automatically whenever vPilot opens and close automatically when
@@ -96,14 +98,19 @@ B) ON VIRTUAL EFB (Android) OR A PHYSICAL TABLET / IPAD / PHONE (Same Wi-Fi):
       http://<YOUR-PC-IP>:8085   (e.g., http://192.168.1.50:8085)
 
 ------------------------------------------------------------------------
-         MULTI-DEVICE PTT, MESSAGING & CONTROLLER CONTROLS
+    CONNECT MODAL, TRANSPONDER, MULTI-PTT & MESSAGING CONTROLS
 ------------------------------------------------------------------------
+- Connect / Mode C / Ident: Use the header buttons to connect/disconnect
+  from VATSIM, toggle transponder Mode C (synced two-way with vPilot &
+  cockpit), and squawk Ident. Type any ICAO code or aircraft model name
+  (e.g. A318, Airbus) in the Connect dialog to select from vPilot's
+  aircraft database — choices sync two-way with vPilot's Connect box.
 - Multi-Device PTT (Stick + Yoke + Key): Click "Binds" next to the PTT
   button -> "+ Add Stick / Yoke / Key PTT" and press your stick/yoke
-  trigger button or keyboard key. Bind multiple controllers at once —
-  once your PTTs are set up, they are saved locally (ptt_bindings.json)
-  and stay active silently whenever vPilot runs, so there is no need to
-  open the browser again!
+  trigger button or keyboard key. Only bound controllers are accessed in
+  flight, and once your PTTs are set up they are saved locally
+  (ptt_bindings.json) and stay active silently whenever vPilot runs
+  (you can also pause hardware PTT anytime with the toggle switch).
 - Send Radio Text: Type in the General / ATIS input bar and press Enter
   or Send to transmit on your active COM TX frequency.
 - vPilot Dot-Commands: Run .ctaf KJFK, .wx KJFK / .metar KJFK, .atis

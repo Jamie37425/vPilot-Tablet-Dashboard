@@ -59,6 +59,36 @@ namespace vPilotTabletMirror
         private bool _dashboardPttActive = false;
         private bool _lastSentPluginPtt = false;
 
+        // Connect / Transponder State
+        private SynchronizationContext _uiSyncContext;
+        private bool _isNetworkConnected = false;
+        private bool _isConnecting = false;
+        private bool _modeC = false;
+        private bool _identActive = false;
+        private string _lastCallsign = "";
+        private string _lastTypeCode = "";
+        private string _lastSelcalCode = "";
+        private bool _lastObserverMode = false;
+        private System.Threading.Timer _identResetTimer;
+        private System.Threading.Timer _modeCResyncTimer;
+        private PropertyInfo _cachedModeCProp;
+        private PropertyInfo _cachedDzModeCProp;
+        private object _cachedDzObj;
+        private bool _searchedDzModeC = false;
+        private bool? _lastObservedLiveModeC = null;
+        private bool _modeCChangedByEvent = false;
+        private object _cachedConfigObj;
+        private bool _searchedConfigObj = false;
+        private int _pollRunning = 0;
+        private int _atisRefreshing = 0;
+        private DateTime _lastAtisRefreshUtc = DateTime.MinValue;
+        private DateTime _lastRadioBroadcastUtc = DateTime.MinValue;
+        private DateTime _lastConfigCheckUtc = DateTime.MinValue;
+        private string _lastRadioJson = "";
+        private readonly object _aircraftTypesLock = new object();
+        private byte[] _cachedAircraftTypesHttpBytes;
+        private string _cachedAircraftTypesWsJson;
+
         // SimConnect Fields
         private SimConnect _simConnect = null;
         private EventWaitHandle _simConnectEvent = new AutoResetEvent(false);
@@ -98,6 +128,8 @@ namespace vPilotTabletMirror
         public void Initialize(IBroker broker)
         {
             _broker = broker;
+            _uiSyncContext = SynchronizationContext.Current;
+            ReadLastConnectInfoFromConfig();
 
             try
             {
@@ -178,8 +210,16 @@ namespace vPilotTabletMirror
 
             _pollTimer = new System.Threading.Timer(async _ =>
             {
-                PollSimConnect();
-                await BroadcastStates();
+                if (Interlocked.CompareExchange(ref _pollRunning, 1, 0) != 0) return;
+                try
+                {
+                    PollSimConnect();
+                    await BroadcastStates();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _pollRunning, 0);
+                }
             }, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         }
 
@@ -488,6 +528,86 @@ namespace vPilotTabletMirror
             catch (Exception) { }
         }
 
+        [EventSubscription("NetworkConnectionInitiated", typeof(Publisher))]
+        public void OnNetworkConnectionInitiated(object sender, EventArgs e)
+        {
+            _isConnecting = true;
+            BroadcastNetworkStatus();
+        }
+
+        [EventSubscription("NetworkConnectionFailed", typeof(Publisher))]
+        public void OnNetworkConnectionFailed(object sender, EventArgs e)
+        {
+            _isConnecting = false;
+            _isNetworkConnected = false;
+            string reason = GetPropOrFieldValue<string>(e, "Reason");
+            if (string.IsNullOrWhiteSpace(reason)) reason = GetPropOrFieldValue<string>(e, "Message");
+            if (string.IsNullOrWhiteSpace(reason)) reason = "Connection to VATSIM failed.";
+            BroadcastJson(JsonConvert.SerializeObject(new { Type = "ConnectStatus", Status = "Error", Message = reason }));
+            BroadcastNetworkStatus();
+        }
+
+        private static bool ExtractBoolFromEventArgs(EventArgs e, bool fallback, params string[] preferredNames)
+        {
+            if (e == null) return fallback;
+            try
+            {
+                const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase;
+                var type = e.GetType();
+                if (preferredNames != null)
+                {
+                    foreach (var name in preferredNames)
+                    {
+                        var prop = type.GetProperty(name, flags);
+                        if (prop != null && prop.PropertyType == typeof(bool))
+                        {
+                            return (bool)prop.GetValue(e);
+                        }
+                        var field = type.GetField(name, flags);
+                        if (field != null && field.FieldType == typeof(bool))
+                        {
+                            return (bool)field.GetValue(e);
+                        }
+                    }
+                }
+
+                // Fallback: if EventArgs declares a single boolean property, read it
+                var boolProps = type.GetProperties(flags).Where(p => p.PropertyType == typeof(bool) && p.GetIndexParameters().Length == 0).ToList();
+                if (boolProps.Count == 1)
+                {
+                    return (bool)boolProps[0].GetValue(e);
+                }
+            }
+            catch { }
+            return fallback;
+        }
+
+        [EventSubscription("SquawkingModeCChanged", typeof(Publisher))]
+        public void OnSquawkingModeCChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                if (e == null) return;
+                bool newModeC = ExtractBoolFromEventArgs(e, _modeC, "SquawkingModeC", "ModeC", "IsSquawkingModeC", "Enabled", "State", "Value", "Active");
+                _modeCChangedByEvent = true;
+                _modeC = newModeC;
+                BroadcastNetworkStatus();
+            }
+            catch { }
+        }
+
+        [EventSubscription("SquawkingIdentChanged", typeof(Publisher))]
+        public void OnSquawkingIdentChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                if (e == null) return;
+                _identActive = ExtractBoolFromEventArgs(e, _identActive, "SquawkingIdent", "Ident", "IsSquawkingIdent", "Enabled", "State", "Value", "Active");
+                BroadcastNetworkStatus();
+            }
+            catch { }
+        }
+
         #endregion
 
         private static string FormatFrequencyUint(uint freq)
@@ -538,6 +658,52 @@ namespace vPilotTabletMirror
             return defaultValue;
         }
 
+        private static bool HasMember(object target, string name)
+        {
+            if (target == null || string.IsNullOrEmpty(name)) return false;
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase;
+            var t = target.GetType();
+            return t.GetProperty(name, flags) != null || t.GetField(name, flags) != null;
+        }
+
+        private static bool SetPropOrFieldValue(object target, object value, params string[] names)
+        {
+            if (target == null || names == null) return false;
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase;
+            var type = target.GetType();
+            foreach (var name in names)
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                try
+                {
+                    var prop = type.GetProperty(name, flags);
+                    if (prop != null && prop.CanWrite)
+                    {
+                        object converted = value;
+                        if (value != null && !prop.PropertyType.IsAssignableFrom(value.GetType()))
+                        {
+                            converted = Convert.ChangeType(value, prop.PropertyType);
+                        }
+                        prop.SetValue(target, converted);
+                        return true;
+                    }
+                    var field = type.GetField(name, flags);
+                    if (field != null && !field.IsInitOnly)
+                    {
+                        object converted = value;
+                        if (value != null && !field.FieldType.IsAssignableFrom(value.GetType()))
+                        {
+                            converted = Convert.ChangeType(value, field.FieldType);
+                        }
+                        field.SetValue(target, converted);
+                        return true;
+                    }
+                }
+                catch { }
+            }
+            return false;
+        }
+
         private void HandleWebSocketMessage(string message, IWebSocketConnection socket = null)
         {
             try
@@ -555,7 +721,16 @@ namespace vPilotTabletMirror
                 }
                 else if (action == "get_ptt_bindings")
                 {
+                    _multiPttManager?.RequestDeviceRefresh();
                     SendPttBindingsToSocket(socket);
+                }
+                else if (action == "set_hardware_ptt_enabled")
+                {
+                    if (command.TryGetValue("Enabled", out var enObj) &&
+                        bool.TryParse(enObj?.ToString(), out bool enabled))
+                    {
+                        _multiPttManager?.SetHardwarePttEnabled(enabled);
+                    }
                 }
                 else if (action == "start_ptt_capture")
                 {
@@ -583,10 +758,52 @@ namespace vPilotTabletMirror
                 }
                 else if (action == "get_state")
                 {
+                    if (SyncConnectInfoFromMemoryAndConfig())
+                    {
+                        BroadcastNetworkStatus();
+                    }
                     string effectiveCs = GetEffectiveCallsign();
                     if (!string.IsNullOrEmpty(effectiveCs)) _myCallsign = effectiveCs;
                     BroadcastRadioStateQuick();
                     BroadcastCallsign();
+                    SendNetworkStatusToSocket(socket);
+                }
+                else if (action == "connect_vatsim")
+                {
+                    ConnectVatsimFromDashboard(command, socket);
+                }
+                else if (action == "disconnect_vatsim")
+                {
+                    DisconnectVatsimFromDashboard(socket);
+                }
+                else if (action == "toggle_mode_c")
+                {
+                    if (TryReadLiveModeCFromVpilot(out bool liveModeC))
+                    {
+                        _modeC = liveModeC;
+                    }
+                    SetModeCFromDashboard(!_modeC, socket);
+                }
+                else if (action == "set_mode_c")
+                {
+                    if (TryReadLiveModeCFromVpilot(out bool liveModeC))
+                    {
+                        _modeC = liveModeC;
+                    }
+                    bool enabled = command.TryGetValue("Enabled", out var enObj) && bool.TryParse(enObj?.ToString(), out bool b) ? b : !_modeC;
+                    SetModeCFromDashboard(enabled, socket);
+                }
+                else if (action == "squawk_ident")
+                {
+                    SquawkIdentFromDashboard(socket);
+                }
+                else if (action == "get_aircraft_types")
+                {
+                    EnsureAircraftTypesLoaded();
+                    if (socket != null && socket.IsAvailable && !string.IsNullOrEmpty(_cachedAircraftTypesWsJson))
+                    {
+                        socket.Send(_cachedAircraftTypesWsJson);
+                    }
                 }
                 else if (action == "set_active_com")
                 {
@@ -731,7 +948,8 @@ namespace vPilotTabletMirror
                 Bindings = bindings,
                 Devices = devices,
                 ActiveIds = activeIds,
-                IsCapturing = manager?.IsCapturing ?? false
+                IsCapturing = manager?.IsCapturing ?? false,
+                HardwarePttEnabled = manager?.HardwarePttEnabled ?? true
             };
         }
 
@@ -1530,10 +1748,19 @@ namespace vPilotTabletMirror
 
         private void OnNetworkConnected(object sender, NetworkConnectedEventArgs e)
         {
-            if (e != null && !string.IsNullOrEmpty(e.Callsign))
+            _isNetworkConnected = true;
+            _isConnecting = false;
+            if (e != null)
             {
-                _myCallsign = e.Callsign.Trim().ToUpper();
-                BroadcastCallsign();
+                if (!string.IsNullOrEmpty(e.Callsign))
+                {
+                    _myCallsign = e.Callsign.Trim().ToUpper();
+                    _lastCallsign = _myCallsign;
+                    BroadcastCallsign();
+                }
+                if (!string.IsNullOrEmpty(e.TypeCode)) _lastTypeCode = e.TypeCode.Trim().ToUpper();
+                _lastSelcalCode = (e.SelcalCode ?? "").Trim().ToUpper();
+                _lastObserverMode = e.ObserverMode;
             }
             else
             {
@@ -1541,19 +1768,26 @@ namespace vPilotTabletMirror
                 if (!string.IsNullOrEmpty(cs))
                 {
                     _myCallsign = cs;
+                    _lastCallsign = cs;
                     BroadcastCallsign();
                 }
             }
+            BroadcastJson(JsonConvert.SerializeObject(new { Type = "ConnectStatus", Status = "Connected", Message = "" }));
+            BroadcastNetworkStatus();
         }
 
         private void OnNetworkDisconnected(object sender, EventArgs e)
         {
+            _isNetworkConnected = false;
+            _isConnecting = false;
+            _identActive = false;
             string cs = GetEffectiveCallsign();
             if (!string.IsNullOrEmpty(cs))
             {
                 _myCallsign = cs;
                 BroadcastCallsign();
             }
+            BroadcastNetworkStatus();
         }
 
         [EventSubscription("NetworkConnected", typeof(Publisher))]
@@ -1561,19 +1795,21 @@ namespace vPilotTabletMirror
         {
             try
             {
+                _isNetworkConnected = true;
+                _isConnecting = false;
                 string cs = "";
                 if (e != null)
                 {
-                    var info = GetPropOrFieldValue<object>(e, "ConnectInfo");
-                    if (info != null)
-                    {
-                        cs = GetPropOrFieldValue<string>(info, "Callsign");
-                    }
-                    if (string.IsNullOrEmpty(cs))
-                    {
-                        cs = GetPropOrFieldValue<string>(e, "Callsign");
-                    }
+                    var info = GetPropOrFieldValue<object>(e, "ConnectInfo") ?? e;
+                    cs = GetPropOrFieldValue<string>(info, "Callsign");
+                    string tc = GetPropOrFieldValue<string>(info, "TypeCode");
+                    string sc = GetPropOrFieldValue<string>(info, "SelcalCode") ?? GetPropOrFieldValue<string>(info, "SelCalCode");
+                    bool obs = GetPropOrFieldValue<bool>(info, "ObserverMode", _lastObserverMode);
+                    if (!string.IsNullOrEmpty(tc)) _lastTypeCode = tc.Trim().ToUpper();
+                    if (sc != null) _lastSelcalCode = sc.Trim().ToUpper();
+                    _lastObserverMode = obs;
                 }
+                SyncConnectInfoFromMemoryAndConfig();
                 if (string.IsNullOrEmpty(cs))
                 {
                     cs = GetEffectiveCallsign();
@@ -1581,9 +1817,12 @@ namespace vPilotTabletMirror
                 if (!string.IsNullOrEmpty(cs))
                 {
                     _myCallsign = cs.Trim().ToUpper();
+                    _lastCallsign = _myCallsign;
                     BroadcastCallsign();
                     BroadcastRadioStateQuick();
                 }
+                BroadcastJson(JsonConvert.SerializeObject(new { Type = "ConnectStatus", Status = "Connected", Message = "" }));
+                BroadcastNetworkStatus();
             }
             catch (Exception) { }
         }
@@ -1593,6 +1832,10 @@ namespace vPilotTabletMirror
         {
             try
             {
+                _isNetworkConnected = false;
+                _isConnecting = false;
+                _identActive = false;
+                SyncConnectInfoFromMemoryAndConfig();
                 string cs = GetEffectiveCallsign();
                 if (!string.IsNullOrEmpty(cs))
                 {
@@ -1600,8 +1843,751 @@ namespace vPilotTabletMirror
                     BroadcastCallsign();
                     BroadcastRadioStateQuick();
                 }
+                BroadcastNetworkStatus();
             }
             catch (Exception) { }
+        }
+
+        private void RunOnUiThread(Action action)
+        {
+            if (action == null) return;
+            var ctx = _uiSyncContext;
+            if (ctx == null || SynchronizationContext.Current == ctx)
+            {
+                action();
+                return;
+            }
+
+            Exception captured = null;
+            ctx.Send(_ =>
+            {
+                try { action(); }
+                catch (Exception ex) { captured = ex; }
+            }, null);
+            if (captured != null) throw captured;
+        }
+
+        private DateTime _lastConfigFileWriteUtc = DateTime.MinValue;
+
+        private bool ReadLastConnectInfoFromConfig(bool forceIfModified = true)
+        {
+            bool changed = false;
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string configFile = Path.Combine(appData, "vPilot", "vPilotConfig.xml");
+                if (!File.Exists(configFile)) return false;
+
+                DateTime writeUtc = File.GetLastWriteTimeUtc(configFile);
+                if (!forceIfModified && _lastConfigFileWriteUtc != DateTime.MinValue) return false;
+                if (_lastConfigFileWriteUtc != DateTime.MinValue && writeUtc <= _lastConfigFileWriteUtc) return false;
+                _lastConfigFileWriteUtc = writeUtc;
+
+                using (var stream = new FileStream(configFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    var doc = new System.Xml.XmlDocument();
+                    doc.Load(stream);
+
+                    var lastNode = doc.SelectSingleNode("//LastConnectInfo");
+                    if (lastNode?.Attributes != null)
+                    {
+                        string cs = lastNode.Attributes["Callsign"]?.Value?.Trim().ToUpper();
+                        string tc = lastNode.Attributes["TypeCode"]?.Value?.Trim().ToUpper();
+                        string sc = (lastNode.Attributes["SelCalCode"]?.Value ?? lastNode.Attributes["SelcalCode"]?.Value)?.Trim().ToUpper();
+                        string obsStr = lastNode.Attributes["ObserverMode"]?.Value;
+
+                        if (!string.IsNullOrWhiteSpace(cs) && cs != _lastCallsign) { _lastCallsign = cs; changed = true; }
+                        if (!string.IsNullOrWhiteSpace(tc) && tc != _lastTypeCode) { _lastTypeCode = tc; changed = true; }
+                        if (sc != null && sc != _lastSelcalCode) { _lastSelcalCode = sc; changed = true; }
+                        if (bool.TryParse(obsStr, out bool isObs) && isObs != _lastObserverMode) { _lastObserverMode = isObs; changed = true; }
+                    }
+
+                    var modeCNode = doc.SelectSingleNode("//SquawkingModeC");
+                    if (modeCNode != null && bool.TryParse(modeCNode.InnerText?.Trim(), out bool mc) && mc != _modeC)
+                    {
+                        _modeC = mc;
+                        changed = true;
+                    }
+                }
+            }
+            catch (Exception) { }
+            return changed;
+        }
+
+        private static bool TypeHasMember(Type t, string name)
+        {
+            if (t == null || string.IsNullOrEmpty(name)) return false;
+            if (t.IsPrimitive || t == typeof(string) || t.IsEnum || typeof(Delegate).IsAssignableFrom(t)) return false;
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase;
+            return t.GetProperty(name, flags) != null || t.GetField(name, flags) != null;
+        }
+
+        private object FindVpilotConfigObject()
+        {
+            if (_cachedConfigObj != null) return _cachedConfigObj;
+            if (_searchedConfigObj) return null;
+            _searchedConfigObj = true;
+
+            try
+            {
+                // 1. Metadata-first check on static fields/properties (never invokes unrelated getters)
+                var vpilotAsm = GetVpilotAssembly();
+                if (vpilotAsm != null)
+                {
+                    foreach (var t in vpilotAsm.GetTypes())
+                    {
+                        foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+                        {
+                            if (p.GetIndexParameters().Length != 0) continue;
+                            if (!TypeHasMember(p.PropertyType, "LastConnectInfo")) continue;
+                            try
+                            {
+                                var val = p.GetValue(null);
+                                if (val != null)
+                                {
+                                    _cachedConfigObj = val;
+                                    return _cachedConfigObj;
+                                }
+                            }
+                            catch { }
+                        }
+                        foreach (var f in t.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+                        {
+                            if (!TypeHasMember(f.FieldType, "LastConnectInfo")) continue;
+                            try
+                            {
+                                var val = f.GetValue(null);
+                                if (val != null)
+                                {
+                                    _cachedConfigObj = val;
+                                    return _cachedConfigObj;
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
+                // 2. Bounded scan over _broker -> dzObj Checking LastConnectInfo member directly
+                var visited = new HashSet<object>();
+                var queue = new Queue<KeyValuePair<object, int>>();
+                if (_broker != null) queue.Enqueue(new KeyValuePair<object, int>(_broker, 0));
+
+                while (queue.Count > 0)
+                {
+                    var item = queue.Dequeue();
+                    object curr = item.Key;
+                    int depth = item.Value;
+                    if (curr == null || !visited.Add(curr)) continue;
+
+                    if (HasMember(curr, "LastConnectInfo"))
+                    {
+                        _cachedConfigObj = curr;
+                        return _cachedConfigObj;
+                    }
+                    if (depth >= 2) continue;
+
+                    var t = curr.GetType();
+                    foreach (var f in t.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    {
+                        try
+                        {
+                            var ft = f.FieldType;
+                            if (ft.IsPrimitive || ft == typeof(string) || ft.IsEnum || typeof(Delegate).IsAssignableFrom(ft)) continue;
+                            if (ft.Assembly != vpilotAsm && ft.Assembly != _broker?.GetType().Assembly) continue;
+                            var val = f.GetValue(curr);
+                            if (val != null) queue.Enqueue(new KeyValuePair<object, int>(val, depth + 1));
+                        }
+                        catch { }
+                    }
+                    foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    {
+                        if (p.GetIndexParameters().Length != 0) continue;
+                        try
+                        {
+                            var pt = p.PropertyType;
+                            if (!TypeHasMember(pt, "LastConnectInfo")) continue;
+                            var val = p.GetValue(curr);
+                            if (val != null) queue.Enqueue(new KeyValuePair<object, int>(val, depth + 1));
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private object GetConnectInfoFromMemory()
+        {
+            try
+            {
+                if (_broker != null)
+                {
+                    var aaField = _broker.GetType().GetField("aa", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var dzObj = aaField?.GetValue(_broker);
+                    var cgMethod = dzObj?.GetType().GetMethod("cg", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (cgMethod != null)
+                    {
+                        return cgMethod.Invoke(dzObj, null);
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private bool ApplyConnectInfoObject(object info)
+        {
+            if (info == null) return false;
+            bool changed = false;
+            string cs = GetPropOrFieldValue<string>(info, "Callsign")?.Trim().ToUpper();
+            string tc = GetPropOrFieldValue<string>(info, "TypeCode")?.Trim().ToUpper();
+            string sc = (GetPropOrFieldValue<string>(info, "SelCalCode") ?? GetPropOrFieldValue<string>(info, "SelcalCode"))?.Trim().ToUpper();
+            bool obs = GetPropOrFieldValue<bool>(info, "ObserverMode", _lastObserverMode);
+
+            if (!string.IsNullOrWhiteSpace(cs) && cs != _lastCallsign) { _lastCallsign = cs; changed = true; }
+            if (!string.IsNullOrWhiteSpace(tc) && tc != _lastTypeCode) { _lastTypeCode = tc; changed = true; }
+            if (sc != null && sc != _lastSelcalCode) { _lastSelcalCode = sc; changed = true; }
+            if ((!string.IsNullOrWhiteSpace(cs) || !string.IsNullOrWhiteSpace(tc)) && obs != _lastObserverMode)
+            {
+                _lastObserverMode = obs;
+                changed = true;
+            }
+            return changed;
+        }
+
+        private bool SyncConnectInfoFromMemoryAndConfig()
+        {
+            bool changed = false;
+            try
+            {
+                if (_isNetworkConnected || _isConnecting)
+                {
+                    object memInfo = GetConnectInfoFromMemory();
+                    if (ApplyConnectInfoObject(memInfo)) changed = true;
+                }
+
+                object configObj = FindVpilotConfigObject();
+                object lastInfo = GetPropOrFieldValue<object>(configObj, "LastConnectInfo");
+                if (ApplyConnectInfoObject(lastInfo)) changed = true;
+
+                if (ReadLastConnectInfoFromConfig(forceIfModified: true)) changed = true;
+
+                if (!string.IsNullOrEmpty(_lastCallsign) && _lastCallsign != _myCallsign)
+                {
+                    _myCallsign = _lastCallsign;
+                }
+            }
+            catch { }
+            return changed;
+        }
+
+        private void UpdateRecentConnectInfoList(object configObj, string callsign, string typeCode, string selcalCode, bool observerMode)
+        {
+            try
+            {
+                var recentList = GetPropOrFieldValue<object>(configObj, "RecentConnectInfo") as IList;
+                if (recentList == null) return;
+
+                Type listType = recentList.GetType();
+                Type itemType = listType.IsGenericType ? listType.GetGenericArguments().FirstOrDefault() : null;
+                if (itemType == null) return;
+
+                for (int i = recentList.Count - 1; i >= 0; i--)
+                {
+                    var item = recentList[i];
+                    if (item == null) continue;
+                    string itemCs = GetPropOrFieldValue<string>(item, "Callsign")?.Trim().ToUpper() ?? "";
+                    string itemTc = GetPropOrFieldValue<string>(item, "TypeCode")?.Trim().ToUpper() ?? "";
+                    if (itemCs == callsign && itemTc == (typeCode ?? ""))
+                    {
+                        recentList.RemoveAt(i);
+                    }
+                }
+
+                object entry = Activator.CreateInstance(itemType);
+                SetPropOrFieldValue(entry, callsign, "Callsign");
+                SetPropOrFieldValue(entry, typeCode ?? "", "TypeCode");
+                SetPropOrFieldValue(entry, selcalCode ?? "", "SelCalCode", "SelcalCode");
+                SetPropOrFieldValue(entry, observerMode, "ObserverMode");
+                recentList.Insert(0, entry);
+
+                while (recentList.Count > 10)
+                {
+                    recentList.RemoveAt(recentList.Count - 1);
+                }
+            }
+            catch { }
+        }
+
+        private bool TryInvokeParameterlessSave(object configObj)
+        {
+            if (configObj == null) return false;
+            try
+            {
+                foreach (var name in new[] { "Save", "SaveConfig", "SaveToFile" })
+                {
+                    var m = configObj.GetType().GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                    if (m != null)
+                    {
+                        m.Invoke(configObj, null);
+                        string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                        string configFile = Path.Combine(appData, "vPilot", "vPilotConfig.xml");
+                        if (File.Exists(configFile)) _lastConfigFileWriteUtc = File.GetLastWriteTimeUtc(configFile);
+                        return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private void WriteLastConnectInfoToConfigXml(string callsign, string typeCode, string selcalCode, bool observerMode)
+        {
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string configFile = Path.Combine(appData, "vPilot", "vPilotConfig.xml");
+                if (!File.Exists(configFile)) return;
+
+                var doc = new System.Xml.XmlDocument();
+                using (var stream = new FileStream(configFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    doc.Load(stream);
+                }
+
+                var lastNode = doc.SelectSingleNode("//LastConnectInfo") as System.Xml.XmlElement;
+                if (lastNode == null && doc.DocumentElement != null)
+                {
+                    lastNode = doc.CreateElement("LastConnectInfo");
+                    doc.DocumentElement.AppendChild(lastNode);
+                }
+
+                if (lastNode != null)
+                {
+                    lastNode.SetAttribute("Callsign", callsign ?? "");
+                    if (!observerMode || !string.IsNullOrWhiteSpace(typeCode))
+                    {
+                        lastNode.SetAttribute("TypeCode", typeCode ?? "");
+                    }
+                    lastNode.SetAttribute("SelCalCode", selcalCode ?? "");
+                    lastNode.SetAttribute("ObserverMode", observerMode ? "true" : "false");
+                    doc.Save(configFile);
+                    _lastConfigFileWriteUtc = File.GetLastWriteTimeUtc(configFile);
+                }
+            }
+            catch { }
+        }
+
+        private void SyncLastConnectInfoToVpilot(string callsign, string typeCode, string selcalCode, bool observerMode)
+        {
+            try
+            {
+                object configObj = FindVpilotConfigObject();
+                if (configObj != null)
+                {
+                    object lastInfo = GetPropOrFieldValue<object>(configObj, "LastConnectInfo");
+                    if (lastInfo == null)
+                    {
+                        var infoProp = configObj.GetType().GetProperty("LastConnectInfo", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (infoProp != null && infoProp.CanWrite)
+                        {
+                            lastInfo = Activator.CreateInstance(infoProp.PropertyType);
+                            infoProp.SetValue(configObj, lastInfo);
+                        }
+                    }
+
+                    if (lastInfo != null)
+                    {
+                        SetPropOrFieldValue(lastInfo, callsign, "Callsign");
+                        if (!observerMode || !string.IsNullOrWhiteSpace(typeCode))
+                        {
+                            SetPropOrFieldValue(lastInfo, typeCode, "TypeCode");
+                        }
+                        SetPropOrFieldValue(lastInfo, selcalCode ?? "", "SelCalCode", "SelcalCode");
+                        SetPropOrFieldValue(lastInfo, observerMode, "ObserverMode");
+                    }
+
+                    UpdateRecentConnectInfoList(configObj, callsign, typeCode, selcalCode, observerMode);
+                    if (!TryInvokeParameterlessSave(configObj))
+                    {
+                        WriteLastConnectInfoToConfigXml(callsign, typeCode, selcalCode, observerMode);
+                    }
+                }
+                else
+                {
+                    WriteLastConnectInfoToConfigXml(callsign, typeCode, selcalCode, observerMode);
+                }
+
+                object memInfo = GetConnectInfoFromMemory();
+                if (memInfo != null)
+                {
+                    SetPropOrFieldValue(memInfo, callsign, "Callsign");
+                    if (!observerMode || !string.IsNullOrWhiteSpace(typeCode))
+                    {
+                        SetPropOrFieldValue(memInfo, typeCode, "TypeCode");
+                    }
+                    SetPropOrFieldValue(memInfo, selcalCode ?? "", "SelCalCode", "SelcalCode");
+                    SetPropOrFieldValue(memInfo, observerMode, "ObserverMode");
+                }
+            }
+            catch { }
+        }
+
+        private void EnsureAircraftTypesLoaded()
+        {
+            lock (_aircraftTypesLock)
+            {
+                if (_cachedAircraftTypesHttpBytes != null) return;
+
+                var rows = new List<string[]>();
+                var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var codesWithInfo = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                try
+                {
+                    string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    string binPath = Path.Combine(appData, "vPilot", "ModelMatchingData.bin");
+                    if (File.Exists(binPath))
+                    {
+                        var doc = new System.Xml.XmlDocument();
+                        using (var fs = new FileStream(binPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                        using (var ds = new System.IO.Compression.DeflateStream(fs, System.IO.Compression.CompressionMode.Decompress))
+                        {
+                            doc.Load(ds);
+                        }
+
+                        var infoNodes = doc.SelectNodes("//TypeInfo/TypeInfo");
+                        if (infoNodes != null)
+                        {
+                            foreach (System.Xml.XmlNode node in infoNodes)
+                            {
+                                string tc = node.Attributes?["TypeCode"]?.Value?.Trim().ToUpperInvariant() ?? "";
+                                if (string.IsNullOrEmpty(tc)) continue;
+
+                                codesWithInfo.Add(tc);
+                                string mfr = node.Attributes?["Manufacturer"]?.Value?.Trim() ?? "";
+                                string name = node.Attributes?["Name"]?.Value?.Trim() ?? "";
+                                string desc = $"{mfr} {name}".Trim();
+                                string label = string.IsNullOrEmpty(desc) ? tc : $"{desc} ({tc})";
+
+                                if (seenKeys.Add(tc + "|" + label))
+                                {
+                                    rows.Add(new[] { tc, label });
+                                }
+                            }
+                        }
+
+                        var codeNodes = doc.SelectNodes("//TypeCodes/string");
+                        if (codeNodes != null)
+                        {
+                            foreach (System.Xml.XmlNode node in codeNodes)
+                            {
+                                string tc = node.InnerText?.Trim().ToUpperInvariant() ?? "";
+                                if (!string.IsNullOrEmpty(tc) && !codesWithInfo.Contains(tc) && seenKeys.Add(tc + "|" + tc))
+                                {
+                                    rows.Add(new[] { tc, tc });
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                string arrayJson = JsonConvert.SerializeObject(rows);
+                _cachedAircraftTypesHttpBytes = Encoding.UTF8.GetBytes(arrayJson);
+                _cachedAircraftTypesWsJson = JsonConvert.SerializeObject(new { Type = "AircraftTypes", List = rows });
+            }
+        }
+
+        private object GetNetworkStatusPayload()
+        {
+            SyncConnectInfoFromMemoryAndConfig();
+            if (TryReadLiveModeCFromVpilot(out bool liveModeC))
+            {
+                if (!_lastObservedLiveModeC.HasValue || liveModeC != _lastObservedLiveModeC.Value)
+                {
+                    _lastObservedLiveModeC = liveModeC;
+                    _modeC = liveModeC;
+                }
+            }
+            return new
+            {
+                Type = "NetworkStatus",
+                IsConnected = _isNetworkConnected,
+                IsConnecting = _isConnecting,
+                ModeC = _modeC,
+                IdentActive = _identActive,
+                Callsign = _lastCallsign ?? "",
+                TypeCode = _lastTypeCode ?? "",
+                SelcalCode = _lastSelcalCode ?? "",
+                ObserverMode = _lastObserverMode
+            };
+        }
+
+        private void BroadcastNetworkStatus()
+        {
+            try
+            {
+                BroadcastJson(JsonConvert.SerializeObject(GetNetworkStatusPayload()));
+            }
+            catch { }
+        }
+
+        private void SendNetworkStatusToSocket(IWebSocketConnection socket)
+        {
+            try
+            {
+                if (socket != null && socket.IsAvailable)
+                {
+                    socket.Send(JsonConvert.SerializeObject(GetNetworkStatusPayload()));
+                }
+            }
+            catch { }
+        }
+
+        private void SendConnectStatusToClient(IWebSocketConnection socket, string status, string message)
+        {
+            string json = JsonConvert.SerializeObject(new
+            {
+                Type = "ConnectStatus",
+                Status = status,
+                Message = message ?? ""
+            });
+            if (socket != null && socket.IsAvailable)
+            {
+                try { socket.Send(json); } catch { }
+            }
+            else
+            {
+                BroadcastJson(json);
+            }
+        }
+
+        private void ConnectVatsimFromDashboard(Dictionary<string, object> command, IWebSocketConnection socket)
+        {
+            string callsign = command.TryGetValue("Callsign", out var csObj) ? csObj?.ToString()?.Trim().ToUpper() ?? "" : "";
+            string typeCode = command.TryGetValue("TypeCode", out var tcObj) ? tcObj?.ToString()?.Trim().ToUpper() ?? "" : "";
+            string selcalCode = command.TryGetValue("SelcalCode", out var scObj) ? scObj?.ToString()?.Trim().ToUpper() ?? "" : "";
+            bool observerMode = command.TryGetValue("ObserverMode", out var obsObj) && bool.TryParse(obsObj?.ToString(), out bool obsVal) && obsVal;
+
+            if (string.IsNullOrWhiteSpace(callsign))
+            {
+                SendConnectStatusToClient(socket, "Error", "Please enter a callsign.");
+                return;
+            }
+            if (!observerMode && string.IsNullOrWhiteSpace(typeCode))
+            {
+                SendConnectStatusToClient(socket, "Error", "Please enter an aircraft type ICAO code (e.g. A319, B738).");
+                return;
+            }
+
+            _lastCallsign = callsign;
+            _lastTypeCode = typeCode;
+            _lastSelcalCode = selcalCode;
+            _lastObserverMode = observerMode;
+            _myCallsign = callsign;
+            BroadcastCallsign();
+
+            try
+            {
+                _isConnecting = true;
+                BroadcastNetworkStatus();
+
+                RunOnUiThread(() =>
+                {
+                    SyncLastConnectInfoToVpilot(callsign, typeCode, selcalCode, observerMode);
+                    if (observerMode)
+                    {
+                        _broker.RequestConnectAsObserver(callsign);
+                    }
+                    else
+                    {
+                        _broker.RequestConnect(callsign, typeCode, selcalCode);
+                    }
+                });
+            }
+            catch (AlreadyConnectedException)
+            {
+                _isConnecting = false;
+                _isNetworkConnected = true;
+                SendConnectStatusToClient(socket, "Connected", "");
+                BroadcastNetworkStatus();
+            }
+            catch (SimNotReadyException)
+            {
+                _isConnecting = false;
+                BroadcastNetworkStatus();
+                SendConnectStatusToClient(socket, "Error", "Simulator is not ready. Load into the cockpit in MSFS first (or connect as Observer).");
+            }
+            catch (Exception ex)
+            {
+                _isConnecting = false;
+                BroadcastNetworkStatus();
+                SendConnectStatusToClient(socket, "Error", $"Failed to connect: {ex.Message}");
+            }
+        }
+
+        private void DisconnectVatsimFromDashboard(IWebSocketConnection socket)
+        {
+            try
+            {
+                RunOnUiThread(() => _broker.RequestDisconnect());
+            }
+            catch (NotConnectedException)
+            {
+                _isNetworkConnected = false;
+                _isConnecting = false;
+                BroadcastNetworkStatus();
+            }
+            catch (Exception ex)
+            {
+                SendErrorToClient(socket, "General", $"Failed to disconnect: {ex.Message}");
+            }
+        }
+
+        private bool TryReadLiveModeCFromVpilot(out bool modeC)
+        {
+            modeC = _modeC;
+            try
+            {
+                if (!_searchedDzModeC && _broker != null)
+                {
+                    _searchedDzModeC = true;
+                    var aaField = _broker.GetType().GetField("aa", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    _cachedDzObj = aaField?.GetValue(_broker);
+                    if (_cachedDzObj != null)
+                    {
+                        foreach (var propName in new[] { "SquawkingModeC", "ModeC", "IsSquawkingModeC" })
+                        {
+                            var p = _cachedDzObj.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                            if (p != null && p.PropertyType == typeof(bool) && p.GetIndexParameters().Length == 0)
+                            {
+                                _cachedDzModeCProp = p;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (_cachedDzObj != null && _cachedDzModeCProp != null)
+                {
+                    modeC = (bool)_cachedDzModeCProp.GetValue(_cachedDzObj);
+                    return true;
+                }
+
+                object cfg = FindVpilotConfigObject();
+                if (cfg != null)
+                {
+                    if (_cachedModeCProp == null)
+                    {
+                        _cachedModeCProp = cfg.GetType().GetProperty("SquawkingModeC",
+                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                    }
+                    if (_cachedModeCProp != null && _cachedModeCProp.PropertyType == typeof(bool) && _cachedModeCProp.GetIndexParameters().Length == 0)
+                    {
+                        modeC = (bool)_cachedModeCProp.GetValue(cfg);
+                        return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private void ScheduleModeCResync()
+        {
+            try
+            {
+                _modeCResyncTimer?.Dispose();
+                _modeCResyncTimer = new System.Threading.Timer(_ =>
+                {
+                    try
+                    {
+                        if (TryReadLiveModeCFromVpilot(out bool liveModeC) && liveModeC != _modeC)
+                        {
+                            _modeC = liveModeC;
+                            BroadcastNetworkStatus();
+                        }
+                    }
+                    catch { }
+                }, null, 250, Timeout.Infinite);
+            }
+            catch { }
+        }
+
+        private void SetModeCFromDashboard(bool targetModeC, IWebSocketConnection socket)
+        {
+            try
+            {
+                _modeCChangedByEvent = false;
+                RunOnUiThread(() => _broker.SetModeC(targetModeC));
+
+                if (!_modeCChangedByEvent)
+                {
+                    if (TryReadLiveModeCFromVpilot(out bool liveAfterBroker))
+                    {
+                        _lastObservedLiveModeC = liveAfterBroker;
+                        if (liveAfterBroker != targetModeC)
+                        {
+                            RunOnUiThread(() => TryFireVpilotCommand(CreateVpilotCommand(GetVpilotAssembly(), "ToggleModeCCommand"), socket));
+                            if (TryReadLiveModeCFromVpilot(out bool liveAfterCmd))
+                            {
+                                liveAfterBroker = liveAfterCmd;
+                                _lastObservedLiveModeC = liveAfterCmd;
+                            }
+                        }
+                        if (!_modeCChangedByEvent)
+                        {
+                            _modeC = liveAfterBroker;
+                        }
+                    }
+                }
+
+                BroadcastNetworkStatus();
+                ScheduleModeCResync();
+            }
+            catch (NotConnectedException)
+            {
+                _modeCChangedByEvent = false;
+                RunOnUiThread(() => TryFireVpilotCommand(CreateVpilotCommand(GetVpilotAssembly(), "ToggleModeCCommand"), socket));
+                if (!_modeCChangedByEvent && TryReadLiveModeCFromVpilot(out bool liveAfterCmd))
+                {
+                    _lastObservedLiveModeC = liveAfterCmd;
+                    _modeC = liveAfterCmd;
+                }
+                BroadcastNetworkStatus();
+                ScheduleModeCResync();
+            }
+            catch (Exception ex)
+            {
+                SendErrorToClient(socket, "General", $"Failed to toggle Mode C: {ex.Message}");
+            }
+        }
+
+        private void SquawkIdentFromDashboard(IWebSocketConnection socket)
+        {
+            try
+            {
+                RunOnUiThread(() => _broker.SquawkIdent());
+                _identActive = true;
+                BroadcastNetworkStatus();
+                _identResetTimer?.Dispose();
+                _identResetTimer = new System.Threading.Timer(_ =>
+                {
+                    _identActive = false;
+                    BroadcastNetworkStatus();
+                }, null, 4500, Timeout.Infinite);
+            }
+            catch (NotConnectedException)
+            {
+                SendErrorToClient(socket, "General", "Cannot squawk IDENT: vPilot is not connected to VATSIM.");
+            }
+            catch (Exception ex)
+            {
+                SendErrorToClient(socket, "General", $"Failed to squawk IDENT: {ex.Message}");
+            }
         }
 
         private void BroadcastCallsign()
@@ -1619,87 +2605,60 @@ namespace vPilotTabletMirror
 
         private string GetEffectiveCallsign()
         {
-            try
-            {
-                string memCs = GetCallsignFromMemory();
-                if (!string.IsNullOrEmpty(memCs)) return memCs;
-            }
-            catch { }
-
-            return ReadCallsignFromConfig();
-        }
-
-        private string GetCallsignFromMemory()
-        {
-            try
-            {
-                if (_broker != null)
-                {
-                    var brokerType = _broker.GetType();
-                    var aaField = brokerType.GetField("aa", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (aaField != null)
-                    {
-                        var dzObj = aaField.GetValue(_broker);
-                        if (dzObj != null)
-                        {
-                            var dzType = dzObj.GetType();
-                            var cgMethod = dzType.GetMethod("cg", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            if (cgMethod != null)
-                            {
-                                var connectInfo = cgMethod.Invoke(dzObj, null);
-                                if (connectInfo != null)
-                                {
-                                    var cs = GetPropOrFieldValue<string>(connectInfo, "Callsign");
-                                    if (!string.IsNullOrEmpty(cs)) return cs.Trim().ToUpper();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-            return "";
-        }
-
-        private string ReadCallsignFromConfig()
-        {
-            try
-            {
-                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                string configFile = Path.Combine(appData, "vPilot", "vPilotConfig.xml");
-                if (File.Exists(configFile))
-                {
-                    using (var stream = new FileStream(configFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                    {
-                        var doc = new System.Xml.XmlDocument();
-                        doc.Load(stream);
-                        var node = doc.SelectSingleNode("//LastConnectInfo/@Callsign");
-                        if (node != null && !string.IsNullOrEmpty(node.Value))
-                        {
-                            return node.Value.Trim().ToUpper();
-                        }
-                    }
-                }
-            }
-            catch (Exception) { }
-            return "";
+            SyncConnectInfoFromMemoryAndConfig();
+            return _lastCallsign ?? "";
         }
 
         private async Task BroadcastStates()
         {
             try
             {
-                string cs = GetEffectiveCallsign();
-                if (!string.IsNullOrEmpty(cs) && cs != _myCallsign)
+                bool hasSockets;
+                lock (_socketLock)
                 {
-                    _myCallsign = cs;
-                    BroadcastCallsign();
+                    hasSockets = _sockets.Count > 0;
                 }
 
-                var radioData = GetCurrentRadioData();
-                BroadcastJson(JsonConvert.SerializeObject(radioData));
+                DateTime now = DateTime.UtcNow;
+                if ((now - _lastConfigCheckUtc).TotalSeconds >= 2.0)
+                {
+                    _lastConfigCheckUtc = now;
+                    string prevCs = _myCallsign;
+                    bool infoChanged = ReadLastConnectInfoFromConfig(forceIfModified: true);
+                    if (!string.IsNullOrEmpty(_lastCallsign) && _lastCallsign != prevCs)
+                    {
+                        _myCallsign = _lastCallsign;
+                        if (hasSockets) BroadcastCallsign();
+                    }
+                    if (infoChanged && hasSockets)
+                    {
+                        BroadcastNetworkStatus();
+                    }
+                }
 
-                await RefreshVatsimAtis();
+                if (hasSockets)
+                {
+                    if (TryReadLiveModeCFromVpilot(out bool liveModeC))
+                    {
+                        bool changedFromLast = !_lastObservedLiveModeC.HasValue || liveModeC != _lastObservedLiveModeC.Value;
+                        _lastObservedLiveModeC = liveModeC;
+                        if (changedFromLast && liveModeC != _modeC)
+                        {
+                            _modeC = liveModeC;
+                            BroadcastNetworkStatus();
+                        }
+                    }
+
+                    string radioJson = JsonConvert.SerializeObject(GetCurrentRadioData());
+                    if (radioJson != _lastRadioJson || (now - _lastRadioBroadcastUtc).TotalSeconds >= 5.0)
+                    {
+                        _lastRadioJson = radioJson;
+                        _lastRadioBroadcastUtc = now;
+                        BroadcastJson(radioJson);
+                    }
+                }
+
+                await RefreshVatsimAtis(force: false);
             }
             catch (Exception) { }
         }
@@ -1723,7 +2682,7 @@ namespace vPilotTabletMirror
                     socket.Send(JsonConvert.SerializeObject(csData));
                 }
 
-                await RefreshVatsimAtis();
+                await RefreshVatsimAtis(force: false);
 
                 List<ControllerInfo> list;
                 lock (_localControllers)
@@ -1742,14 +2701,20 @@ namespace vPilotTabletMirror
                 if (socket.IsAvailable) socket.Send(JsonConvert.SerializeObject(historyData));
 
                 SendPttBindingsToSocket(socket);
+                SendNetworkStatusToSocket(socket);
             }
             catch (Exception) { }
         }
 
-        private async Task RefreshVatsimAtis()
+        private async Task RefreshVatsimAtis(bool force = false)
         {
+            if (_localControllers.Count == 0) return;
+            if (!force && (DateTime.UtcNow - _lastAtisRefreshUtc).TotalSeconds < 30.0) return;
+            if (Interlocked.CompareExchange(ref _atisRefreshing, 1, 0) != 0) return;
+
             try
             {
+                _lastAtisRefreshUtc = DateTime.UtcNow;
                 string url = "https://data.vatsim.net/v3/vatsim-data.json";
                 string response = await _httpClient.GetStringAsync(url);
                 var vatsimData = JObject.Parse(response);
@@ -1778,6 +2743,10 @@ namespace vPilotTabletMirror
                 }
             }
             catch (Exception) { }
+            finally
+            {
+                Interlocked.Exchange(ref _atisRefreshing, 0);
+            }
         }
 
         public void Shutdown()
@@ -1803,6 +2772,10 @@ namespace vPilotTabletMirror
             StopDashboardServer();
 
             _pollTimer?.Dispose();
+            _identResetTimer?.Dispose();
+            _identResetTimer = null;
+            _modeCResyncTimer?.Dispose();
+            _modeCResyncTimer = null;
             if (_simConnect != null)
             {
                 try { _simConnect.Dispose(); } catch { }
@@ -1891,6 +2864,23 @@ namespace vPilotTabletMirror
                             byte[] notFound = Encoding.ASCII.GetBytes(
                                 "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                             stream.Write(notFound, 0, notFound.Length);
+                            return;
+                        }
+
+                        if (firstLine.IndexOf("/aircraft-types.json", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            EnsureAircraftTypesLoaded();
+                            byte[] jsonBody = _cachedAircraftTypesHttpBytes ?? Encoding.UTF8.GetBytes("[]");
+                            string jsonHeaders =
+                                "HTTP/1.1 200 OK\r\n" +
+                                "Content-Type: application/json; charset=utf-8\r\n" +
+                                $"Content-Length: {jsonBody.Length}\r\n" +
+                                "Cache-Control: max-age=3600\r\n" +
+                                "Connection: close\r\n\r\n";
+                            byte[] jsonHeaderBytes = Encoding.ASCII.GetBytes(jsonHeaders);
+                            stream.Write(jsonHeaderBytes, 0, jsonHeaderBytes.Length);
+                            stream.Write(jsonBody, 0, jsonBody.Length);
+                            stream.Flush();
                             return;
                         }
 

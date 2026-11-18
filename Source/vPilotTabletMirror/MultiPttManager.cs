@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -38,12 +39,28 @@ namespace vPilotTabletMirror
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
 
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateWindowExW(
+            int dwExStyle, string lpClassName, string lpWindowName, int dwStyle,
+            int x, int y, int nWidth, int nHeight,
+            IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool DestroyWindow(IntPtr hWnd);
+
+        private sealed class PttConfigFile
+        {
+            public bool HardwarePttEnabled { get; set; } = true;
+            public List<PttBinding> Bindings { get; set; } = new List<PttBinding>();
+        }
+
         private sealed class DeviceHandle : IDisposable
         {
             public DeviceInstance Info { get; set; }
             public Joystick Joystick { get; set; }
             public string InstanceGuidStr { get; set; }
             public string ProductGuidStr { get; set; }
+            public DateTime NextRetryUtc { get; set; }
 
             public void Dispose()
             {
@@ -61,6 +78,9 @@ namespace vPilotTabletMirror
 
         private CancellationTokenSource _cts;
         private Thread _pollThread;
+        private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
+        private volatile bool _deviceRefreshRequested = true;
+        private bool _hardwarePttEnabled = true;
         private bool _hardwarePttActive;
 
         // Capture mode fields (managed under _stateLock)
@@ -126,6 +146,49 @@ namespace vPilotTabletMirror
             get { lock (_stateLock) { return _capturing || _captureRequested; } }
         }
 
+        public bool HardwarePttEnabled
+        {
+            get { lock (_stateLock) { return _hardwarePttEnabled; } }
+        }
+
+        public void SetHardwarePttEnabled(bool enabled)
+        {
+            bool changed = false;
+            lock (_stateLock)
+            {
+                if (_hardwarePttEnabled != enabled)
+                {
+                    _hardwarePttEnabled = enabled;
+                    changed = true;
+                    if (!enabled && (_capturing || _captureRequested))
+                    {
+                        _capturing = false;
+                        _captureRequested = false;
+                        _baselineButtons.Clear();
+                        _baselineKeys.Clear();
+                    }
+                    SaveBindingsToDiskLocked();
+                }
+            }
+
+            if (changed)
+            {
+                if (!enabled)
+                {
+                    UpdatePressedState(new HashSet<string>());
+                }
+                _deviceRefreshRequested = true;
+                try { _wakeEvent.Set(); } catch { }
+                BindingsUpdated?.Invoke();
+            }
+        }
+
+        public void RequestDeviceRefresh()
+        {
+            _deviceRefreshRequested = true;
+            try { _wakeEvent.Set(); } catch { }
+        }
+
         public void StartCapture(int timeoutMs = 15000)
         {
             lock (_stateLock)
@@ -136,6 +199,8 @@ namespace vPilotTabletMirror
                 _baselineButtons.Clear();
                 _baselineKeys.Clear();
             }
+            _deviceRefreshRequested = true;
+            try { _wakeEvent.Set(); } catch { }
             CaptureStatusChanged?.Invoke("Listening", null, "Press any button on your stick, yoke, throttle, or keyboard (Esc to cancel)...");
         }
 
@@ -152,6 +217,8 @@ namespace vPilotTabletMirror
             }
             if (wasActive)
             {
+                _deviceRefreshRequested = true;
+                try { _wakeEvent.Set(); } catch { }
                 CaptureStatusChanged?.Invoke("Cancelled", null, reason);
             }
         }
@@ -167,7 +234,12 @@ namespace vPilotTabletMirror
                 removed = _bindings.Count < countBefore;
                 if (removed) SaveBindingsToDiskLocked();
             }
-            if (removed) BindingsUpdated?.Invoke();
+            if (removed)
+            {
+                _deviceRefreshRequested = true;
+                try { _wakeEvent.Set(); } catch { }
+                BindingsUpdated?.Invoke();
+            }
             return removed;
         }
 
@@ -185,7 +257,12 @@ namespace vPilotTabletMirror
                     SaveBindingsToDiskLocked();
                 }
             }
-            if (changed) BindingsUpdated?.Invoke();
+            if (changed)
+            {
+                _deviceRefreshRequested = true;
+                try { _wakeEvent.Set(); } catch { }
+                BindingsUpdated?.Invoke();
+            }
             return changed;
         }
 
@@ -193,14 +270,18 @@ namespace vPilotTabletMirror
         {
             DirectInput directInput = null;
             var devices = new Dictionary<string, DeviceHandle>(StringComparer.OrdinalIgnoreCase);
-            DateTime lastScanUtc = DateTime.MinValue;
+            IntPtr createdHiddenHwnd = IntPtr.Zero;
+            bool initialScanDone = false;
+            bool wasCaptureMode = false;
 
             try
             {
                 directInput = new DirectInput();
+                IntPtr ownerHwnd = ResolveDirectInputOwnerHwnd(ref createdHiddenHwnd);
 
                 while (!token.IsCancellationRequested)
                 {
+                    bool pttEnabled;
                     bool capturePending;
                     bool captureActive;
                     DateTime captureDeadline;
@@ -208,22 +289,38 @@ namespace vPilotTabletMirror
 
                     lock (_stateLock)
                     {
+                        pttEnabled = _hardwarePttEnabled;
                         capturePending = _captureRequested;
                         captureActive = _capturing;
                         captureDeadline = _captureDeadlineUtc;
                         enabledBindings = _bindings.Where(b => b.Enabled).Select(CloneBinding).ToList();
                     }
 
-                    bool rescanDue = capturePending || (DateTime.UtcNow - lastScanUtc).TotalSeconds >= 3.0;
-                    if (rescanDue)
+                    bool captureMode = capturePending || captureActive;
+                    bool captureJustEnded = wasCaptureMode && !captureMode;
+                    wasCaptureMode = captureMode;
+
+                    if (!initialScanDone || _deviceRefreshRequested || capturePending || captureJustEnded)
                     {
-                        RefreshAttachedDevices(directInput, devices);
-                        lastScanUtc = DateTime.UtcNow;
+                        _deviceRefreshRequested = false;
+                        initialScanDone = true;
+                        RefreshAttachedDevices(directInput, devices, enabledBindings, captureMode, pttEnabled, ownerHwnd);
+                    }
+
+                    if (!pttEnabled && !captureMode)
+                    {
+                        if (devices.Count > 0)
+                        {
+                            ReleaseAllDevices(devices);
+                        }
+                        UpdatePressedState(new HashSet<string>());
+                        _wakeEvent.WaitOne(250);
+                        continue;
                     }
 
                     if (capturePending)
                     {
-                        BeginCaptureSnapshot(devices);
+                        BeginCaptureSnapshot(devices, ownerHwnd);
                         captureActive = true;
                     }
 
@@ -233,19 +330,24 @@ namespace vPilotTabletMirror
                         {
                             EndCaptureTimeout();
                         }
-                        else if (CheckForCapturedInput(devices))
+                        else if (CheckForCapturedInput(devices, ownerHwnd))
                         {
-                            // Reload bindings snapshot after capture completed
+                            // Reload bindings snapshot after capture completed and release any unused devices
                             lock (_stateLock)
                             {
+                                pttEnabled = _hardwarePttEnabled;
                                 enabledBindings = _bindings.Where(b => b.Enabled).Select(CloneBinding).ToList();
                             }
+                            RefreshAttachedDevices(directInput, devices, enabledBindings, false, pttEnabled, ownerHwnd);
                         }
                     }
 
-                    EvaluateActiveBindings(devices, enabledBindings);
+                    if (pttEnabled)
+                    {
+                        EvaluateActiveBindings(devices, enabledBindings, ownerHwnd);
+                    }
 
-                    Thread.Sleep(25);
+                    _wakeEvent.WaitOne(captureMode ? 25 : 50);
                 }
             }
             catch (Exception)
@@ -254,21 +356,67 @@ namespace vPilotTabletMirror
             }
             finally
             {
-                foreach (var handle in devices.Values)
+                ReleaseAllDevices(devices);
+                if (createdHiddenHwnd != IntPtr.Zero)
                 {
-                    handle.Dispose();
+                    try { DestroyWindow(createdHiddenHwnd); } catch { }
                 }
-                devices.Clear();
                 try { directInput?.Dispose(); } catch { }
             }
         }
 
-        private void RefreshAttachedDevices(DirectInput directInput, Dictionary<string, DeviceHandle> devices)
+        private static IntPtr ResolveDirectInputOwnerHwnd(ref IntPtr createdHiddenHwnd)
+        {
+            try
+            {
+                IntPtr mainHwnd = Process.GetCurrentProcess().MainWindowHandle;
+                if (mainHwnd != IntPtr.Zero) return mainHwnd;
+            }
+            catch { }
+
+            try
+            {
+                // Message-only helper window so SetCooperativeLevel always has a valid owner HWND
+                createdHiddenHwnd = CreateWindowExW(
+                    0, "STATIC", "vPilotTabletMirrorPttOwner", 0,
+                    0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                if (createdHiddenHwnd != IntPtr.Zero) return createdHiddenHwnd;
+            }
+            catch { }
+
+            return IntPtr.Zero;
+        }
+
+        private static void ReleaseAllDevices(Dictionary<string, DeviceHandle> devices)
+        {
+            foreach (var handle in devices.Values)
+            {
+                handle.Dispose();
+            }
+            devices.Clear();
+        }
+
+        private static bool IsDeviceNeededForBindings(DeviceInstance devInstance, string instGuid, string prodGuid, List<PttBinding> enabledBindings)
+        {
+            if (enabledBindings == null || enabledBindings.Count == 0) return false;
+            return enabledBindings.Any(b =>
+                b.Kind == "JoystickButton" &&
+                (string.Equals(b.InstanceGuid, instGuid, StringComparison.OrdinalIgnoreCase) ||
+                 (!string.IsNullOrEmpty(b.ProductGuid) && string.Equals(b.ProductGuid, prodGuid, StringComparison.OrdinalIgnoreCase))));
+        }
+
+        private void RefreshAttachedDevices(
+            DirectInput directInput,
+            Dictionary<string, DeviceHandle> devices,
+            List<PttBinding> enabledBindings,
+            bool captureMode,
+            bool pttEnabled,
+            IntPtr ownerHwnd)
         {
             try
             {
                 var attached = directInput.GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AttachedOnly);
-                var currentGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var neededGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var snapshotList = new List<ConnectedInputDevice>();
 
                 foreach (var devInstance in attached)
@@ -277,7 +425,6 @@ namespace vPilotTabletMirror
                     string prodGuid = devInstance.ProductGuid.ToString();
                     string name = (devInstance.InstanceName ?? "Game Controller").Trim();
 
-                    currentGuids.Add(instGuid);
                     snapshotList.Add(new ConnectedInputDevice
                     {
                         Name = name,
@@ -285,43 +432,65 @@ namespace vPilotTabletMirror
                         ProductGuid = prodGuid
                     });
 
+                    bool needed = captureMode || (pttEnabled && IsDeviceNeededForBindings(devInstance, instGuid, prodGuid, enabledBindings));
+                    if (!needed) continue;
+
+                    neededGuids.Add(instGuid);
+
                     if (!devices.ContainsKey(instGuid))
                     {
                         try
                         {
                             var joystick = new Joystick(directInput, devInstance.InstanceGuid);
+                            if (ownerHwnd != IntPtr.Zero)
+                            {
+                                joystick.SetCooperativeLevel(ownerHwnd, CooperativeLevel.Background | CooperativeLevel.NonExclusive);
+                            }
                             try { joystick.Acquire(); } catch { }
                             devices[instGuid] = new DeviceHandle
                             {
                                 Info = devInstance,
                                 Joystick = joystick,
                                 InstanceGuidStr = instGuid,
-                                ProductGuidStr = prodGuid
+                                ProductGuidStr = prodGuid,
+                                NextRetryUtc = DateTime.MinValue
                             };
                         }
                         catch { }
                     }
                 }
 
-                var removedKeys = devices.Keys.Where(k => !currentGuids.Contains(k)).ToList();
+                // Immediately dispose handles for unplugged or unbound controllers so MSFS controls are never touched unnecessarily
+                var removedKeys = devices.Keys.Where(k => !neededGuids.Contains(k)).ToList();
                 foreach (var key in removedKeys)
                 {
                     devices[key].Dispose();
                     devices.Remove(key);
                 }
 
+                bool listChanged;
                 lock (_stateLock)
                 {
+                    listChanged = _connectedDevices.Count != snapshotList.Count ||
+                        _connectedDevices.Select(d => d.InstanceGuid).Zip(snapshotList.Select(d => d.InstanceGuid), string.Equals).Any(eq => !eq);
                     _connectedDevices.Clear();
                     _connectedDevices.AddRange(snapshotList);
+                }
+
+                if (listChanged)
+                {
+                    BindingsUpdated?.Invoke();
                 }
             }
             catch { }
         }
 
-        private bool[] ReadJoystickButtons(DeviceHandle handle)
+        private bool[] ReadJoystickButtons(DeviceHandle handle, IntPtr ownerHwnd)
         {
             if (handle?.Joystick == null) return null;
+            DateTime now = DateTime.UtcNow;
+            if (now < handle.NextRetryUtc) return null;
+
             try
             {
                 handle.Joystick.Poll();
@@ -329,8 +498,14 @@ namespace vPilotTabletMirror
             }
             catch
             {
+                // Cooldown prevents 40 Hz Acquire() spam against DirectInput if a controller sleeps or drops
+                handle.NextRetryUtc = now.AddSeconds(2);
                 try
                 {
+                    if (ownerHwnd != IntPtr.Zero)
+                    {
+                        handle.Joystick.SetCooperativeLevel(ownerHwnd, CooperativeLevel.Background | CooperativeLevel.NonExclusive);
+                    }
                     handle.Joystick.Acquire();
                     handle.Joystick.Poll();
                     return handle.Joystick.GetCurrentState()?.Buttons;
@@ -342,12 +517,12 @@ namespace vPilotTabletMirror
             }
         }
 
-        private void BeginCaptureSnapshot(Dictionary<string, DeviceHandle> devices)
+        private void BeginCaptureSnapshot(Dictionary<string, DeviceHandle> devices, IntPtr ownerHwnd)
         {
             var joyBaseline = new Dictionary<string, bool[]>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in devices)
             {
-                var buttons = ReadJoystickButtons(kvp.Value);
+                var buttons = ReadJoystickButtons(kvp.Value, ownerHwnd);
                 if (buttons != null)
                 {
                     joyBaseline[kvp.Key] = (bool[])buttons.Clone();
@@ -385,7 +560,7 @@ namespace vPilotTabletMirror
             CaptureStatusChanged?.Invoke("Timeout", null, "Timed out waiting for a stick, yoke, or keyboard input.");
         }
 
-        private bool CheckForCapturedInput(Dictionary<string, DeviceHandle> devices)
+        private bool CheckForCapturedInput(Dictionary<string, DeviceHandle> devices, IntPtr ownerHwnd)
         {
             // Esc cancels capture cleanly
             if (IsVirtualKeyDown(0x1B))
@@ -397,7 +572,7 @@ namespace vPilotTabletMirror
             // 1. Check all attached DirectInput controllers for a fresh false -> true button press
             foreach (var kvp in devices)
             {
-                var buttons = ReadJoystickButtons(kvp.Value);
+                var buttons = ReadJoystickButtons(kvp.Value, ownerHwnd);
                 if (buttons == null) continue;
 
                 _baselineButtons.TryGetValue(kvp.Key, out var baseBtns);
@@ -517,7 +692,7 @@ namespace vPilotTabletMirror
             BindingsUpdated?.Invoke();
         }
 
-        private void EvaluateActiveBindings(Dictionary<string, DeviceHandle> devices, List<PttBinding> enabledBindings)
+        private void EvaluateActiveBindings(Dictionary<string, DeviceHandle> devices, List<PttBinding> enabledBindings, IntPtr ownerHwnd)
         {
             if (enabledBindings.Count == 0)
             {
@@ -547,7 +722,7 @@ namespace vPilotTabletMirror
 
                     if (!cachedButtons.TryGetValue(handle.InstanceGuidStr, out var buttons))
                     {
-                        buttons = ReadJoystickButtons(handle);
+                        buttons = ReadJoystickButtons(handle, ownerHwnd);
                         cachedButtons[handle.InstanceGuidStr] = buttons;
                     }
 
@@ -686,13 +861,32 @@ namespace vPilotTabletMirror
             try
             {
                 if (!File.Exists(_configPath)) return;
-                string json = File.ReadAllText(_configPath);
-                var loaded = JsonConvert.DeserializeObject<List<PttBinding>>(json);
-                if (loaded != null)
+                string json = File.ReadAllText(_configPath)?.Trim();
+                if (string.IsNullOrEmpty(json)) return;
+
+                List<PttBinding> loaded = null;
+                bool loadedEnabled = true;
+
+                if (json.StartsWith("["))
                 {
-                    lock (_stateLock)
+                    loaded = JsonConvert.DeserializeObject<List<PttBinding>>(json);
+                }
+                else
+                {
+                    var cfg = JsonConvert.DeserializeObject<PttConfigFile>(json);
+                    if (cfg != null)
                     {
-                        _bindings.Clear();
+                        loadedEnabled = cfg.HardwarePttEnabled;
+                        loaded = cfg.Bindings;
+                    }
+                }
+
+                lock (_stateLock)
+                {
+                    _hardwarePttEnabled = loadedEnabled;
+                    _bindings.Clear();
+                    if (loaded != null)
+                    {
                         foreach (var b in loaded)
                         {
                             if (b == null) continue;
@@ -714,7 +908,12 @@ namespace vPilotTabletMirror
                 {
                     Directory.CreateDirectory(dir);
                 }
-                string json = JsonConvert.SerializeObject(_bindings, Formatting.Indented);
+                var payload = new PttConfigFile
+                {
+                    HardwarePttEnabled = _hardwarePttEnabled,
+                    Bindings = _bindings
+                };
+                string json = JsonConvert.SerializeObject(payload, Formatting.Indented);
                 File.WriteAllText(_configPath, json);
             }
             catch { }
@@ -738,6 +937,7 @@ namespace vPilotTabletMirror
         public void Dispose()
         {
             try { _cts?.Cancel(); } catch { }
+            try { _wakeEvent.Set(); } catch { }
             try
             {
                 if (_pollThread != null && _pollThread.IsAlive)
@@ -749,6 +949,7 @@ namespace vPilotTabletMirror
             _pollThread = null;
             try { _cts?.Dispose(); } catch { }
             _cts = null;
+            try { _wakeEvent.Dispose(); } catch { }
         }
     }
 }
