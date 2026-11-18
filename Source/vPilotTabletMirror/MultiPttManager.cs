@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
+using System.Windows.Forms;
 using Newtonsoft.Json;
-using SharpDX.DirectInput;
 
 namespace vPilotTabletMirror
 {
@@ -34,19 +34,115 @@ namespace vPilotTabletMirror
         public string ProductGuid { get; set; }
     }
 
+    /// <summary>
+    /// Monitors multiple flight controllers and keyboard/mouse binds simultaneously using
+    /// passive Windows Raw Input (WM_INPUT) so MSFS 2024 DirectInput devices are never acquired or polled.
+    /// </summary>
     public class MultiPttManager : IDisposable
     {
+        private const int WM_INPUT = 0x00FF;
+        private const int WM_INPUT_DEVICE_CHANGE = 0x00FE;
+        private const int WM_APP = 0x8000;
+        private const int WM_APP_SYNC = WM_APP + 1;
+        private const int WM_APP_REFRESH_DEVICES = WM_APP + 2;
+        private const int WM_APP_EXIT = WM_APP + 3;
+
+        private const uint RID_INPUT = 0x10000003;
+        private const uint RIM_TYPEHID = 2;
+        private const uint RIDEV_REMOVE = 0x00000001;
+        private const uint RIDEV_INPUTSINK = 0x00000100;
+        private const uint RIDEV_DEVNOTIFY = 0x00002000;
+        private const uint RIDI_PREPARSEDDATA = 0x20000005;
+        private const uint RIDI_DEVICENAME = 0x20000007;
+        private const uint RIDI_DEVICEINFO = 0x2000000B;
+
+        private const int HIDP_INPUT = 0;
+        private const int HIDP_STATUS_SUCCESS = 0x00110000;
+        private const ushort HID_USAGE_PAGE_GENERIC = 0x01;
+        private const ushort HID_USAGE_GENERIC_JOYSTICK = 0x04;
+        private const ushort HID_USAGE_GENERIC_GAMEPAD = 0x05;
+        private const ushort HID_USAGE_PAGE_BUTTON = 0x09;
+
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern IntPtr CreateWindowExW(
-            int dwExStyle, string lpClassName, string lpWindowName, int dwStyle,
-            int x, int y, int nWidth, int nHeight,
-            IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PostMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool DestroyWindow(IntPtr hWnd);
+        private static extern bool RegisterRawInputDevices(
+            [In] RAWINPUTDEVICE[] pRawInputDevices, uint uiNumDevices, uint cbSize);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetRawInputDeviceList(
+            IntPtr pRawInputDeviceList, ref uint puiNumDevices, uint cbSize);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetRawInputDeviceInfoW(
+            IntPtr hDevice, uint uiCommand, IntPtr pData, ref uint pcbSize);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetRawInputData(
+            IntPtr hRawInput, uint uiCommand, IntPtr pData, ref uint pcbSize, uint cbSizeHeader);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFileW(
+            string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+            IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        [DllImport("hid.dll", SetLastError = true)]
+        private static extern bool HidD_GetProductString(
+            IntPtr HidDeviceObject, [Out] byte[] Buffer, uint BufferLength);
+
+        [DllImport("hid.dll")]
+        private static extern uint HidP_MaxUsageListLength(
+            int ReportType, ushort UsagePage, IntPtr PreparsedData);
+
+        [DllImport("hid.dll")]
+        private static extern int HidP_GetUsages(
+            int ReportType, ushort UsagePage, ushort LinkCollection,
+            [Out] ushort[] UsageList, ref uint UsageLength,
+            IntPtr PreparsedData, IntPtr Report, uint ReportLength);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RAWINPUTDEVICELIST
+        {
+            public IntPtr hDevice;
+            public uint dwType;
+        }
+
+        [StructLayout(LayoutKind.Explicit, Size = 32)]
+        private struct RID_DEVICE_INFO
+        {
+            [FieldOffset(0)] public uint cbSize;
+            [FieldOffset(4)] public uint dwType;
+            [FieldOffset(8)] public uint hidVendorId;
+            [FieldOffset(12)] public uint hidProductId;
+            [FieldOffset(16)] public uint hidVersionNumber;
+            [FieldOffset(20)] public ushort hidUsagePage;
+            [FieldOffset(22)] public ushort hidUsage;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RAWINPUTDEVICE
+        {
+            public ushort usUsagePage;
+            public ushort usUsage;
+            public uint dwFlags;
+            public IntPtr hwndTarget;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RAWINPUTHEADER
+        {
+            public uint dwType;
+            public uint dwSize;
+            public IntPtr hDevice;
+            public IntPtr wParam;
+        }
 
         private sealed class PttConfigFile
         {
@@ -54,19 +150,69 @@ namespace vPilotTabletMirror
             public List<PttBinding> Bindings { get; set; } = new List<PttBinding>();
         }
 
-        private sealed class DeviceHandle : IDisposable
+        private sealed class RawDeviceRecord : IDisposable
         {
-            public DeviceInstance Info { get; set; }
-            public Joystick Joystick { get; set; }
-            public string InstanceGuidStr { get; set; }
+            public IntPtr Handle { get; set; }
+            public string DevicePath { get; set; }
+            public string Name { get; set; }
             public string ProductGuidStr { get; set; }
-            public DateTime NextRetryUtc { get; set; }
+            public IntPtr PreparsedData { get; set; }
+            public uint MaxButtonUsages { get; set; }
+            public HashSet<int> PressedButtons { get; } = new HashSet<int>();
+
+            public void FreePreparsed()
+            {
+                if (PreparsedData != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(PreparsedData);
+                    PreparsedData = IntPtr.Zero;
+                }
+                MaxButtonUsages = 0;
+                PressedButtons.Clear();
+            }
 
             public void Dispose()
             {
-                try { Joystick?.Unacquire(); } catch { }
-                try { Joystick?.Dispose(); } catch { }
-                Joystick = null;
+                FreePreparsed();
+            }
+        }
+
+        private sealed class RawInputMessageWindow : NativeWindow
+        {
+            private readonly MultiPttManager _owner;
+
+            public RawInputMessageWindow(MultiPttManager owner)
+            {
+                _owner = owner;
+                var cp = new CreateParams
+                {
+                    Caption = "vPilotTabletMirrorRawInputSink",
+                    Parent = new IntPtr(-3) // HWND_MESSAGE
+                };
+                CreateHandle(cp);
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                switch (m.Msg)
+                {
+                    case WM_INPUT:
+                        _owner.OnRawInputMessage(m.LParam);
+                        break;
+                    case WM_INPUT_DEVICE_CHANGE:
+                        _owner.OnRawDeviceChange();
+                        break;
+                    case WM_APP_SYNC:
+                        _owner.SyncRegistrationAndDevices(rescanDevices: false);
+                        break;
+                    case WM_APP_REFRESH_DEVICES:
+                        _owner.SyncRegistrationAndDevices(rescanDevices: true);
+                        break;
+                    case WM_APP_EXIT:
+                        _owner.OnThreadExitRequested();
+                        break;
+                }
+                base.WndProc(ref m);
             }
         }
 
@@ -75,19 +221,22 @@ namespace vPilotTabletMirror
         private readonly List<PttBinding> _bindings = new List<PttBinding>();
         private readonly List<ConnectedInputDevice> _connectedDevices = new List<ConnectedInputDevice>();
         private readonly HashSet<string> _activeBindingIds = new HashSet<string>();
+        private readonly Dictionary<IntPtr, RawDeviceRecord> _rawDevices = new Dictionary<IntPtr, RawDeviceRecord>();
 
-        private CancellationTokenSource _cts;
-        private Thread _pollThread;
-        private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
-        private volatile bool _deviceRefreshRequested = true;
+        private Thread _uiThread;
+        private RawInputMessageWindow _messageWindow;
+        private ApplicationContext _appContext;
+        private System.Windows.Forms.Timer _keyboardTimer;
+        private readonly ManualResetEventSlim _threadReady = new ManualResetEventSlim(false);
+        private bool _rawInputRegistered = false;
         private bool _hardwarePttEnabled = true;
-        private bool _hardwarePttActive;
+        private bool _hardwarePttActive = false;
 
         // Capture mode fields (managed under _stateLock)
-        private bool _captureRequested;
-        private bool _capturing;
+        private bool _captureRequested = false;
+        private bool _capturing = false;
         private DateTime _captureDeadlineUtc;
-        private readonly Dictionary<string, bool[]> _baselineButtons = new Dictionary<string, bool[]>();
+        private readonly Dictionary<IntPtr, HashSet<int>> _baselineButtons = new Dictionary<IntPtr, HashSet<int>>();
         private readonly Dictionary<int, bool> _baselineKeys = new Dictionary<int, bool>();
 
         public event Action<bool, List<string>> HardwarePttChanged;
@@ -102,14 +251,16 @@ namespace vPilotTabletMirror
 
         public void Start()
         {
-            if (_pollThread != null) return;
-            _cts = new CancellationTokenSource();
-            _pollThread = new Thread(() => PollLoop(_cts.Token))
+            if (_uiThread != null) return;
+            _threadReady.Reset();
+            _uiThread = new Thread(RunMessageLoop)
             {
                 IsBackground = true,
-                Name = "vPilotMultiPttPollThread"
+                Name = "vPilotMultiPttRawInputThread"
             };
-            _pollThread.Start();
+            _uiThread.SetApartmentState(ApartmentState.STA);
+            _uiThread.Start();
+            _threadReady.Wait(2000);
         }
 
         public List<PttBinding> GetBindingsSnapshot()
@@ -177,16 +328,14 @@ namespace vPilotTabletMirror
                 {
                     UpdatePressedState(new HashSet<string>());
                 }
-                _deviceRefreshRequested = true;
-                try { _wakeEvent.Set(); } catch { }
+                PostThreadMessage(WM_APP_SYNC);
                 BindingsUpdated?.Invoke();
             }
         }
 
         public void RequestDeviceRefresh()
         {
-            _deviceRefreshRequested = true;
-            try { _wakeEvent.Set(); } catch { }
+            PostThreadMessage(WM_APP_REFRESH_DEVICES);
         }
 
         public void StartCapture(int timeoutMs = 15000)
@@ -199,8 +348,7 @@ namespace vPilotTabletMirror
                 _baselineButtons.Clear();
                 _baselineKeys.Clear();
             }
-            _deviceRefreshRequested = true;
-            try { _wakeEvent.Set(); } catch { }
+            PostThreadMessage(WM_APP_REFRESH_DEVICES);
             CaptureStatusChanged?.Invoke("Listening", null, "Press any button on your stick, yoke, throttle, or keyboard (Esc to cancel)...");
         }
 
@@ -217,8 +365,7 @@ namespace vPilotTabletMirror
             }
             if (wasActive)
             {
-                _deviceRefreshRequested = true;
-                try { _wakeEvent.Set(); } catch { }
+                PostThreadMessage(WM_APP_SYNC);
                 CaptureStatusChanged?.Invoke("Cancelled", null, reason);
             }
         }
@@ -236,8 +383,7 @@ namespace vPilotTabletMirror
             }
             if (removed)
             {
-                _deviceRefreshRequested = true;
-                try { _wakeEvent.Set(); } catch { }
+                PostThreadMessage(WM_APP_SYNC);
                 BindingsUpdated?.Invoke();
             }
             return removed;
@@ -259,220 +405,256 @@ namespace vPilotTabletMirror
             }
             if (changed)
             {
-                _deviceRefreshRequested = true;
-                try { _wakeEvent.Set(); } catch { }
+                PostThreadMessage(WM_APP_SYNC);
                 BindingsUpdated?.Invoke();
             }
             return changed;
         }
 
-        private void PollLoop(CancellationToken token)
+        private void PostThreadMessage(int msg)
         {
-            DirectInput directInput = null;
-            var devices = new Dictionary<string, DeviceHandle>(StringComparer.OrdinalIgnoreCase);
-            IntPtr createdHiddenHwnd = IntPtr.Zero;
-            bool initialScanDone = false;
-            bool wasCaptureMode = false;
-
             try
             {
-                directInput = new DirectInput();
-                IntPtr ownerHwnd = ResolveDirectInputOwnerHwnd(ref createdHiddenHwnd);
-
-                while (!token.IsCancellationRequested)
+                var hwnd = _messageWindow?.Handle ?? IntPtr.Zero;
+                if (hwnd != IntPtr.Zero)
                 {
-                    bool pttEnabled;
-                    bool capturePending;
-                    bool captureActive;
-                    DateTime captureDeadline;
-                    List<PttBinding> enabledBindings;
-
-                    lock (_stateLock)
-                    {
-                        pttEnabled = _hardwarePttEnabled;
-                        capturePending = _captureRequested;
-                        captureActive = _capturing;
-                        captureDeadline = _captureDeadlineUtc;
-                        enabledBindings = _bindings.Where(b => b.Enabled).Select(CloneBinding).ToList();
-                    }
-
-                    bool captureMode = capturePending || captureActive;
-                    bool captureJustEnded = wasCaptureMode && !captureMode;
-                    wasCaptureMode = captureMode;
-
-                    if (!initialScanDone || _deviceRefreshRequested || capturePending || captureJustEnded)
-                    {
-                        _deviceRefreshRequested = false;
-                        initialScanDone = true;
-                        RefreshAttachedDevices(directInput, devices, enabledBindings, captureMode, pttEnabled, ownerHwnd);
-                    }
-
-                    if (!pttEnabled && !captureMode)
-                    {
-                        if (devices.Count > 0)
-                        {
-                            ReleaseAllDevices(devices);
-                        }
-                        UpdatePressedState(new HashSet<string>());
-                        _wakeEvent.WaitOne(250);
-                        continue;
-                    }
-
-                    if (capturePending)
-                    {
-                        BeginCaptureSnapshot(devices, ownerHwnd);
-                        captureActive = true;
-                    }
-
-                    if (captureActive)
-                    {
-                        if (DateTime.UtcNow > captureDeadline)
-                        {
-                            EndCaptureTimeout();
-                        }
-                        else if (CheckForCapturedInput(devices, ownerHwnd))
-                        {
-                            // Reload bindings snapshot after capture completed and release any unused devices
-                            lock (_stateLock)
-                            {
-                                pttEnabled = _hardwarePttEnabled;
-                                enabledBindings = _bindings.Where(b => b.Enabled).Select(CloneBinding).ToList();
-                            }
-                            RefreshAttachedDevices(directInput, devices, enabledBindings, false, pttEnabled, ownerHwnd);
-                        }
-                    }
-
-                    if (pttEnabled)
-                    {
-                        EvaluateActiveBindings(devices, enabledBindings, ownerHwnd);
-                    }
-
-                    _wakeEvent.WaitOne(captureMode ? 25 : 50);
+                    PostMessage(hwnd, msg, IntPtr.Zero, IntPtr.Zero);
                 }
             }
-            catch (Exception)
+            catch { }
+        }
+
+        private void RunMessageLoop()
+        {
+            try
             {
-                // Ignore loop termination errors during vPilot exit
+                _messageWindow = new RawInputMessageWindow(this);
+                _appContext = new ApplicationContext();
+                _keyboardTimer = new System.Windows.Forms.Timer { Interval = 50 };
+                _keyboardTimer.Tick += (s, e) => OnKeyboardOrCaptureTick();
+
+                SyncRegistrationAndDevices(rescanDevices: true);
+                _threadReady.Set();
+
+                Application.Run(_appContext);
             }
+            catch { }
             finally
             {
-                ReleaseAllDevices(devices);
-                if (createdHiddenHwnd != IntPtr.Zero)
+                _threadReady.Set();
+                try
                 {
-                    try { DestroyWindow(createdHiddenHwnd); } catch { }
+                    _keyboardTimer?.Stop();
+                    _keyboardTimer?.Dispose();
+                    _keyboardTimer = null;
                 }
-                try { directInput?.Dispose(); } catch { }
+                catch { }
+                RegisterRawInputSink(enable: false);
+                ReleaseAllRawDevices();
+                try
+                {
+                    _messageWindow?.DestroyHandle();
+                    _messageWindow = null;
+                }
+                catch { }
+                try
+                {
+                    _appContext?.Dispose();
+                    _appContext = null;
+                }
+                catch { }
             }
         }
 
-        private static IntPtr ResolveDirectInputOwnerHwnd(ref IntPtr createdHiddenHwnd)
+        private void OnThreadExitRequested()
         {
             try
             {
-                IntPtr mainHwnd = Process.GetCurrentProcess().MainWindowHandle;
-                if (mainHwnd != IntPtr.Zero) return mainHwnd;
+                _keyboardTimer?.Stop();
+                RegisterRawInputSink(enable: false);
+                _appContext?.ExitThread();
             }
             catch { }
+        }
 
+        private void RegisterRawInputSink(bool enable)
+        {
+            if (_messageWindow == null || _messageWindow.Handle == IntPtr.Zero) return;
+            if (enable == _rawInputRegistered) return;
+
+            uint flags = enable ? (RIDEV_INPUTSINK | RIDEV_DEVNOTIFY) : RIDEV_REMOVE;
+            IntPtr target = enable ? _messageWindow.Handle : IntPtr.Zero;
+
+            var rid = new[]
+            {
+                new RAWINPUTDEVICE
+                {
+                    usUsagePage = HID_USAGE_PAGE_GENERIC,
+                    usUsage = HID_USAGE_GENERIC_JOYSTICK,
+                    dwFlags = flags,
+                    hwndTarget = target
+                },
+                new RAWINPUTDEVICE
+                {
+                    usUsagePage = HID_USAGE_PAGE_GENERIC,
+                    usUsage = HID_USAGE_GENERIC_GAMEPAD,
+                    dwFlags = flags,
+                    hwndTarget = target
+                }
+            };
+
+            if (RegisterRawInputDevices(rid, (uint)rid.Length, (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICE))))
+            {
+                _rawInputRegistered = enable;
+            }
+        }
+
+        private void SyncRegistrationAndDevices(bool rescanDevices)
+        {
+            bool pttEnabled;
+            bool capturePending;
+            bool captureActive;
+            List<PttBinding> enabledBindings;
+
+            lock (_stateLock)
+            {
+                pttEnabled = _hardwarePttEnabled;
+                capturePending = _captureRequested;
+                captureActive = _capturing;
+                enabledBindings = _bindings.Where(b => b.Enabled).Select(CloneBinding).ToList();
+            }
+
+            bool captureMode = capturePending || captureActive;
+            bool needJoystickSink = captureMode || (pttEnabled && enabledBindings.Any(b => b.Kind == "JoystickButton"));
+            bool needKeyTimer = captureMode || (pttEnabled && enabledBindings.Any(b => b.Kind == "KeyboardKey"));
+
+            if (rescanDevices || _rawDevices.Count == 0)
+            {
+                EnumerateRawHidControllers();
+            }
+
+            // Prepare PreparsedData ONLY for bound joysticks (or all joysticks during capture); free unused ones
+            foreach (var rec in _rawDevices.Values)
+            {
+                bool needed = captureMode || (pttEnabled && IsDeviceNeededForBindings(rec, enabledBindings));
+                if (needed)
+                {
+                    if (rec.PreparsedData == IntPtr.Zero)
+                    {
+                        LoadPreparsedData(rec);
+                    }
+                }
+                else if (rec.PreparsedData != IntPtr.Zero)
+                {
+                    rec.FreePreparsed();
+                }
+            }
+
+            RegisterRawInputSink(needJoystickSink);
+
+            if (needKeyTimer)
+            {
+                if (_keyboardTimer != null && !_keyboardTimer.Enabled) _keyboardTimer.Start();
+            }
+            else
+            {
+                if (_keyboardTimer != null && _keyboardTimer.Enabled) _keyboardTimer.Stop();
+            }
+
+            if (capturePending)
+            {
+                BeginCaptureSnapshot();
+            }
+            else
+            {
+                EvaluateActiveBindingsSnapshot();
+            }
+        }
+
+        private void OnRawDeviceChange()
+        {
+            SyncRegistrationAndDevices(rescanDevices: true);
+        }
+
+        private void EnumerateRawHidControllers()
+        {
             try
             {
-                // Message-only helper window so SetCooperativeLevel always has a valid owner HWND
-                createdHiddenHwnd = CreateWindowExW(
-                    0, "STATIC", "vPilotTabletMirrorPttOwner", 0,
-                    0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
-                if (createdHiddenHwnd != IntPtr.Zero) return createdHiddenHwnd;
-            }
-            catch { }
+                uint count = 0;
+                uint structSize = (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICELIST));
+                GetRawInputDeviceList(IntPtr.Zero, ref count, structSize);
 
-            return IntPtr.Zero;
-        }
-
-        private static void ReleaseAllDevices(Dictionary<string, DeviceHandle> devices)
-        {
-            foreach (var handle in devices.Values)
-            {
-                handle.Dispose();
-            }
-            devices.Clear();
-        }
-
-        private static bool IsDeviceNeededForBindings(DeviceInstance devInstance, string instGuid, string prodGuid, List<PttBinding> enabledBindings)
-        {
-            if (enabledBindings == null || enabledBindings.Count == 0) return false;
-            return enabledBindings.Any(b =>
-                b.Kind == "JoystickButton" &&
-                (string.Equals(b.InstanceGuid, instGuid, StringComparison.OrdinalIgnoreCase) ||
-                 (!string.IsNullOrEmpty(b.ProductGuid) && string.Equals(b.ProductGuid, prodGuid, StringComparison.OrdinalIgnoreCase))));
-        }
-
-        private void RefreshAttachedDevices(
-            DirectInput directInput,
-            Dictionary<string, DeviceHandle> devices,
-            List<PttBinding> enabledBindings,
-            bool captureMode,
-            bool pttEnabled,
-            IntPtr ownerHwnd)
-        {
-            try
-            {
-                var attached = directInput.GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AttachedOnly);
-                var neededGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var currentHandles = new HashSet<IntPtr>();
                 var snapshotList = new List<ConnectedInputDevice>();
 
-                foreach (var devInstance in attached)
+                if (count > 0)
                 {
-                    string instGuid = devInstance.InstanceGuid.ToString();
-                    string prodGuid = devInstance.ProductGuid.ToString();
-                    string name = (devInstance.InstanceName ?? "Game Controller").Trim();
-
-                    snapshotList.Add(new ConnectedInputDevice
+                    IntPtr buf = Marshal.AllocHGlobal((int)(count * structSize));
+                    try
                     {
-                        Name = name,
-                        InstanceGuid = instGuid,
-                        ProductGuid = prodGuid
-                    });
-
-                    bool needed = captureMode || (pttEnabled && IsDeviceNeededForBindings(devInstance, instGuid, prodGuid, enabledBindings));
-                    if (!needed) continue;
-
-                    neededGuids.Add(instGuid);
-
-                    if (!devices.ContainsKey(instGuid))
-                    {
-                        try
+                        uint actual = GetRawInputDeviceList(buf, ref count, structSize);
+                        if (actual != uint.MaxValue)
                         {
-                            var joystick = new Joystick(directInput, devInstance.InstanceGuid);
-                            if (ownerHwnd != IntPtr.Zero)
+                            for (int i = 0; i < actual; i++)
                             {
-                                joystick.SetCooperativeLevel(ownerHwnd, CooperativeLevel.Background | CooperativeLevel.NonExclusive);
+                                var item = (RAWINPUTDEVICELIST)Marshal.PtrToStructure(
+                                    IntPtr.Add(buf, (int)(i * structSize)), typeof(RAWINPUTDEVICELIST));
+                                if (item.dwType != RIM_TYPEHID) continue;
+
+                                if (!TryReadHidDeviceInfo(item.hDevice, out var info)) continue;
+                                if (info.hidUsagePage != HID_USAGE_PAGE_GENERIC ||
+                                    (info.hidUsage != HID_USAGE_GENERIC_JOYSTICK && info.hidUsage != HID_USAGE_GENERIC_GAMEPAD))
+                                {
+                                    continue;
+                                }
+
+                                currentHandles.Add(item.hDevice);
+
+                                if (!_rawDevices.TryGetValue(item.hDevice, out var rec))
+                                {
+                                    string devPath = ReadDeviceNamePath(item.hDevice);
+                                    string prodName = ReadHidProductName(devPath, info.hidVendorId, info.hidProductId);
+                                    string productGuid = FormatDirectInputProductGuid(info.hidVendorId, info.hidProductId);
+
+                                    rec = new RawDeviceRecord
+                                    {
+                                        Handle = item.hDevice,
+                                        DevicePath = devPath,
+                                        Name = prodName,
+                                        ProductGuidStr = productGuid
+                                    };
+                                    _rawDevices[item.hDevice] = rec;
+                                }
+
+                                snapshotList.Add(new ConnectedInputDevice
+                                {
+                                    Name = rec.Name,
+                                    InstanceGuid = rec.DevicePath,
+                                    ProductGuid = rec.ProductGuidStr
+                                });
                             }
-                            try { joystick.Acquire(); } catch { }
-                            devices[instGuid] = new DeviceHandle
-                            {
-                                Info = devInstance,
-                                Joystick = joystick,
-                                InstanceGuidStr = instGuid,
-                                ProductGuidStr = prodGuid,
-                                NextRetryUtc = DateTime.MinValue
-                            };
                         }
-                        catch { }
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(buf);
                     }
                 }
 
-                // Immediately dispose handles for unplugged or unbound controllers so MSFS controls are never touched unnecessarily
-                var removedKeys = devices.Keys.Where(k => !neededGuids.Contains(k)).ToList();
-                foreach (var key in removedKeys)
+                var removed = _rawDevices.Keys.Where(h => !currentHandles.Contains(h)).ToList();
+                foreach (var h in removed)
                 {
-                    devices[key].Dispose();
-                    devices.Remove(key);
+                    _rawDevices[h].Dispose();
+                    _rawDevices.Remove(h);
                 }
 
                 bool listChanged;
                 lock (_stateLock)
                 {
                     listChanged = _connectedDevices.Count != snapshotList.Count ||
-                        _connectedDevices.Select(d => d.InstanceGuid).Zip(snapshotList.Select(d => d.InstanceGuid), string.Equals).Any(eq => !eq);
+                        _connectedDevices.Select(d => d.InstanceGuid)
+                            .Zip(snapshotList.Select(d => d.InstanceGuid), string.Equals)
+                            .Any(eq => !eq);
                     _connectedDevices.Clear();
                     _connectedDevices.AddRange(snapshotList);
                 }
@@ -485,48 +667,219 @@ namespace vPilotTabletMirror
             catch { }
         }
 
-        private bool[] ReadJoystickButtons(DeviceHandle handle, IntPtr ownerHwnd)
+        private static bool TryReadHidDeviceInfo(IntPtr hDevice, out RID_DEVICE_INFO info)
         {
-            if (handle?.Joystick == null) return null;
-            DateTime now = DateTime.UtcNow;
-            if (now < handle.NextRetryUtc) return null;
-
+            info = new RID_DEVICE_INFO { cbSize = (uint)Marshal.SizeOf(typeof(RID_DEVICE_INFO)) };
+            uint sz = info.cbSize;
+            IntPtr ptr = Marshal.AllocHGlobal((int)sz);
             try
             {
-                handle.Joystick.Poll();
-                return handle.Joystick.GetCurrentState()?.Buttons;
+                Marshal.StructureToPtr(info, ptr, false);
+                if (GetRawInputDeviceInfoW(hDevice, RIDI_DEVICEINFO, ptr, ref sz) == uint.MaxValue)
+                {
+                    return false;
+                }
+                info = (RID_DEVICE_INFO)Marshal.PtrToStructure(ptr, typeof(RID_DEVICE_INFO));
+                return true;
             }
-            catch
+            finally
             {
-                // Cooldown prevents 40 Hz Acquire() spam against DirectInput if a controller sleeps or drops
-                handle.NextRetryUtc = now.AddSeconds(2);
-                try
-                {
-                    if (ownerHwnd != IntPtr.Zero)
-                    {
-                        handle.Joystick.SetCooperativeLevel(ownerHwnd, CooperativeLevel.Background | CooperativeLevel.NonExclusive);
-                    }
-                    handle.Joystick.Acquire();
-                    handle.Joystick.Poll();
-                    return handle.Joystick.GetCurrentState()?.Buttons;
-                }
-                catch
-                {
-                    return null;
-                }
+                Marshal.FreeHGlobal(ptr);
             }
         }
 
-        private void BeginCaptureSnapshot(Dictionary<string, DeviceHandle> devices, IntPtr ownerHwnd)
+        private static string ReadDeviceNamePath(IntPtr hDevice)
         {
-            var joyBaseline = new Dictionary<string, bool[]>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kvp in devices)
+            uint chars = 0;
+            GetRawInputDeviceInfoW(hDevice, RIDI_DEVICENAME, IntPtr.Zero, ref chars);
+            if (chars == 0) return string.Empty;
+
+            IntPtr ptr = Marshal.AllocHGlobal((int)(chars * 2));
+            try
             {
-                var buttons = ReadJoystickButtons(kvp.Value, ownerHwnd);
-                if (buttons != null)
+                if (GetRawInputDeviceInfoW(hDevice, RIDI_DEVICENAME, ptr, ref chars) != uint.MaxValue)
                 {
-                    joyBaseline[kvp.Key] = (bool[])buttons.Clone();
+                    return (Marshal.PtrToStringUni(ptr) ?? string.Empty).Trim();
                 }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptr);
+            }
+            return string.Empty;
+        }
+
+        private static string ReadHidProductName(string devPath, uint vid, uint pid)
+        {
+            if (!string.IsNullOrEmpty(devPath))
+            {
+                IntPtr hf = CreateFileW(devPath, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+                if (hf != IntPtr.Zero && hf != new IntPtr(-1))
+                {
+                    try
+                    {
+                        byte[] buf = new byte[256];
+                        if (HidD_GetProductString(hf, buf, (uint)buf.Length))
+                        {
+                            string name = Encoding.Unicode.GetString(buf).TrimEnd('\0').Trim();
+                            if (!string.IsNullOrEmpty(name)) return name;
+                        }
+                    }
+                    finally
+                    {
+                        CloseHandle(hf);
+                    }
+                }
+            }
+            return $"HID Controller ({vid:X4}:{pid:X4})";
+        }
+
+        private static string FormatDirectInputProductGuid(uint vendorId, uint productId)
+        {
+            return string.Format("{0:x4}{1:x4}-0000-0000-0000-504944564944", productId & 0xFFFF, vendorId & 0xFFFF);
+        }
+
+        private static void LoadPreparsedData(RawDeviceRecord rec)
+        {
+            try
+            {
+                uint sz = 0;
+                GetRawInputDeviceInfoW(rec.Handle, RIDI_PREPARSEDDATA, IntPtr.Zero, ref sz);
+                if (sz == 0) return;
+
+                IntPtr ptr = Marshal.AllocHGlobal((int)sz);
+                if (GetRawInputDeviceInfoW(rec.Handle, RIDI_PREPARSEDDATA, ptr, ref sz) == uint.MaxValue)
+                {
+                    Marshal.FreeHGlobal(ptr);
+                    return;
+                }
+
+                uint maxButtons = HidP_MaxUsageListLength(HIDP_INPUT, HID_USAGE_PAGE_BUTTON, ptr);
+                if (maxButtons == 0) maxButtons = 64;
+                rec.PreparsedData = ptr;
+                rec.MaxButtonUsages = maxButtons;
+            }
+            catch { }
+        }
+
+        private void ReleaseAllRawDevices()
+        {
+            foreach (var rec in _rawDevices.Values)
+            {
+                rec.Dispose();
+            }
+            _rawDevices.Clear();
+        }
+
+        private static bool IsDeviceNeededForBindings(RawDeviceRecord rec, List<PttBinding> enabledBindings)
+        {
+            if (enabledBindings == null || enabledBindings.Count == 0) return false;
+            return enabledBindings.Any(b => b.Kind == "JoystickButton" && BindingMatchesDevice(rec, b));
+        }
+
+        private static bool BindingMatchesDevice(RawDeviceRecord rec, PttBinding bind)
+        {
+            if (!string.IsNullOrEmpty(bind.InstanceGuid) &&
+                string.Equals(bind.InstanceGuid, rec.DevicePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            if (!string.IsNullOrEmpty(bind.ProductGuid) &&
+                string.Equals(bind.ProductGuid, rec.ProductGuidStr, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            if (!string.IsNullOrEmpty(bind.DeviceName) &&
+                string.Equals(bind.DeviceName, rec.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            return false;
+        }
+
+        private void OnRawInputMessage(IntPtr hRawInput)
+        {
+            try
+            {
+                uint dwSize = 0;
+                uint hdrSize = (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER));
+                GetRawInputData(hRawInput, RID_INPUT, IntPtr.Zero, ref dwSize, hdrSize);
+                if (dwSize < hdrSize + 8) return;
+
+                IntPtr buffer = Marshal.AllocHGlobal((int)dwSize);
+                try
+                {
+                    if (GetRawInputData(hRawInput, RID_INPUT, buffer, ref dwSize, hdrSize) == uint.MaxValue) return;
+
+                    var hdr = (RAWINPUTHEADER)Marshal.PtrToStructure(buffer, typeof(RAWINPUTHEADER));
+                    if (hdr.dwType != RIM_TYPEHID) return;
+                    if (!_rawDevices.TryGetValue(hdr.hDevice, out var rec) || rec.PreparsedData == IntPtr.Zero) return;
+
+                    int hidOffset = (int)hdrSize;
+                    uint dwSizeHid = (uint)Marshal.ReadInt32(buffer, hidOffset);
+                    uint dwCount = (uint)Marshal.ReadInt32(buffer, hidOffset + 4);
+                    if (dwSizeHid == 0 || dwCount == 0) return;
+
+                    int rawDataStart = hidOffset + 8;
+                    if (rawDataStart + (dwSizeHid * dwCount) > dwSize) return;
+
+                    uint cap = rec.MaxButtonUsages > 0 ? rec.MaxButtonUsages : 64;
+                    ushort[] usages = new ushort[cap];
+
+                    for (uint r = 0; r < dwCount; r++)
+                    {
+                        uint usageLen = cap;
+                        IntPtr reportPtr = IntPtr.Add(buffer, rawDataStart + (int)(r * dwSizeHid));
+                        int status = HidP_GetUsages(
+                            HIDP_INPUT,
+                            HID_USAGE_PAGE_BUTTON,
+                            0,
+                            usages,
+                            ref usageLen,
+                            rec.PreparsedData,
+                            reportPtr,
+                            dwSizeHid);
+
+                        if (status == HIDP_STATUS_SUCCESS)
+                        {
+                            rec.PressedButtons.Clear();
+                            for (int u = 0; u < usageLen; u++)
+                            {
+                                if (usages[u] >= 1)
+                                {
+                                    rec.PressedButtons.Add(usages[u] - 1);
+                                }
+                            }
+                        }
+                    }
+
+                    bool captureActive;
+                    lock (_stateLock)
+                    {
+                        captureActive = _capturing;
+                    }
+
+                    if (captureActive)
+                    {
+                        CheckCapturedJoystickButton(rec);
+                    }
+
+                    EvaluateActiveBindingsSnapshot();
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+            catch { }
+        }
+
+        private void BeginCaptureSnapshot()
+        {
+            var joyBaseline = new Dictionary<IntPtr, HashSet<int>>();
+            foreach (var rec in _rawDevices.Values)
+            {
+                joyBaseline[rec.Handle] = new HashSet<int>(rec.PressedButtons);
             }
 
             var keyBaseline = new Dictionary<int, bool>();
@@ -548,6 +901,47 @@ namespace vPilotTabletMirror
             }
         }
 
+        private void OnKeyboardOrCaptureTick()
+        {
+            bool pttEnabled;
+            bool captureActive;
+            DateTime captureDeadline;
+            bool hasKeyBinds;
+
+            lock (_stateLock)
+            {
+                pttEnabled = _hardwarePttEnabled;
+                captureActive = _capturing;
+                captureDeadline = _captureDeadlineUtc;
+                hasKeyBinds = _bindings.Any(b => b.Enabled && b.Kind == "KeyboardKey");
+            }
+
+            if (captureActive)
+            {
+                if (DateTime.UtcNow > captureDeadline)
+                {
+                    EndCaptureTimeout();
+                    return;
+                }
+
+                if (IsVirtualKeyDown(0x1B))
+                {
+                    CancelCapture("Capture cancelled (Esc pressed).");
+                    return;
+                }
+
+                if (CheckCapturedVirtualKey())
+                {
+                    return;
+                }
+            }
+
+            if (pttEnabled && hasKeyBinds)
+            {
+                EvaluateActiveBindingsSnapshot();
+            }
+        }
+
         private void EndCaptureTimeout()
         {
             lock (_stateLock)
@@ -557,65 +951,50 @@ namespace vPilotTabletMirror
                 _baselineButtons.Clear();
                 _baselineKeys.Clear();
             }
+            SyncRegistrationAndDevices(rescanDevices: false);
             CaptureStatusChanged?.Invoke("Timeout", null, "Timed out waiting for a stick, yoke, or keyboard input.");
         }
 
-        private bool CheckForCapturedInput(Dictionary<string, DeviceHandle> devices, IntPtr ownerHwnd)
+        private void CheckCapturedJoystickButton(RawDeviceRecord rec)
         {
-            // Esc cancels capture cleanly
-            if (IsVirtualKeyDown(0x1B))
+            _baselineButtons.TryGetValue(rec.Handle, out var baseline);
+
+            // Release latched baseline buttons once user lifts held switches
+            if (baseline != null)
             {
-                CancelCapture("Capture cancelled (Esc pressed).");
-                return false;
+                baseline.RemoveWhere(idx => !rec.PressedButtons.Contains(idx));
             }
 
-            // 1. Check all attached DirectInput controllers for a fresh false -> true button press
-            foreach (var kvp in devices)
+            foreach (int btnIndex in rec.PressedButtons)
             {
-                var buttons = ReadJoystickButtons(kvp.Value, ownerHwnd);
-                if (buttons == null) continue;
+                if (baseline != null && baseline.Contains(btnIndex)) continue;
 
-                _baselineButtons.TryGetValue(kvp.Key, out var baseBtns);
-
-                for (int i = 0; i < buttons.Length; i++)
+                var candidate = new PttBinding
                 {
-                    bool nowDown = buttons[i];
-                    bool wasDownAtStart = baseBtns != null && i < baseBtns.Length && baseBtns[i];
-
-                    if (nowDown && !wasDownAtStart)
-                    {
-                        var binding = new PttBinding
-                        {
-                            Id = Guid.NewGuid().ToString("N").Substring(0, 8),
-                            Kind = "JoystickButton",
-                            DeviceName = (kvp.Value.Info.InstanceName ?? "Controller").Trim(),
-                            InstanceGuid = kvp.Value.InstanceGuidStr,
-                            ProductGuid = kvp.Value.ProductGuidStr,
-                            ButtonIndex = i,
-                            VirtualKeyCode = 0,
-                            Enabled = true
-                        };
-
-                        FinishCapturedBinding(binding);
-                        return true;
-                    }
-                    else if (!nowDown && wasDownAtStart && baseBtns != null && i < baseBtns.Length)
-                    {
-                        // Once a previously held switch is released, allow re-pressing it
-                        baseBtns[i] = false;
-                    }
-                }
+                    Id = Guid.NewGuid().ToString("N").Substring(0, 8),
+                    Kind = "JoystickButton",
+                    DeviceName = rec.Name,
+                    InstanceGuid = rec.DevicePath,
+                    ProductGuid = rec.ProductGuidStr,
+                    ButtonIndex = btnIndex,
+                    VirtualKeyCode = 0,
+                    Enabled = true
+                };
+                FinishCapturedBinding(candidate);
+                return;
             }
+        }
 
-            // 2. Check keyboard / extra mouse keys for a fresh false -> true transition
+        private bool CheckCapturedVirtualKey()
+        {
             foreach (int vk in EnumerateCapturableVirtualKeys())
             {
                 bool nowDown = IsVirtualKeyDown(vk);
-                _baselineKeys.TryGetValue(vk, out bool wasDownAtStart);
+                _baselineKeys.TryGetValue(vk, out bool wasDown);
 
-                if (nowDown && !wasDownAtStart)
+                if (nowDown && !wasDown)
                 {
-                    var binding = new PttBinding
+                    var candidate = new PttBinding
                     {
                         Id = Guid.NewGuid().ToString("N").Substring(0, 8),
                         Kind = "KeyboardKey",
@@ -626,16 +1005,14 @@ namespace vPilotTabletMirror
                         VirtualKeyCode = vk,
                         Enabled = true
                     };
-
-                    FinishCapturedBinding(binding);
+                    FinishCapturedBinding(candidate);
                     return true;
                 }
-                else if (!nowDown && wasDownAtStart)
+                else if (!nowDown && wasDown)
                 {
                     _baselineKeys[vk] = false;
                 }
             }
-
             return false;
         }
 
@@ -684,6 +1061,8 @@ namespace vPilotTabletMirror
                 SaveBindingsToDiskLocked();
             }
 
+            SyncRegistrationAndDevices(rescanDevices: false);
+
             string msg = duplicate
                 ? $"Updated existing PTT bind: {finalBinding.DisplayLabel}"
                 : $"Bound PTT: {finalBinding.DisplayLabel}";
@@ -692,18 +1071,23 @@ namespace vPilotTabletMirror
             BindingsUpdated?.Invoke();
         }
 
-        private void EvaluateActiveBindings(Dictionary<string, DeviceHandle> devices, List<PttBinding> enabledBindings, IntPtr ownerHwnd)
+        private void EvaluateActiveBindingsSnapshot()
         {
-            if (enabledBindings.Count == 0)
+            bool pttEnabled;
+            List<PttBinding> enabledBindings;
+            lock (_stateLock)
+            {
+                pttEnabled = _hardwarePttEnabled;
+                enabledBindings = _bindings.Where(b => b.Enabled).Select(CloneBinding).ToList();
+            }
+
+            if (!pttEnabled || enabledBindings.Count == 0)
             {
                 UpdatePressedState(new HashSet<string>());
                 return;
             }
 
-            // Poll only devices that match an enabled binding (unless capture mode already polled them)
-            var cachedButtons = new Dictionary<string, bool[]>(StringComparer.OrdinalIgnoreCase);
             var pressedIds = new HashSet<string>();
-
             foreach (var bind in enabledBindings)
             {
                 if (bind.Kind == "KeyboardKey")
@@ -717,18 +1101,13 @@ namespace vPilotTabletMirror
 
                 if (bind.Kind == "JoystickButton" && bind.ButtonIndex >= 0)
                 {
-                    DeviceHandle handle = FindMatchingDevice(devices, bind);
-                    if (handle == null) continue;
-
-                    if (!cachedButtons.TryGetValue(handle.InstanceGuidStr, out var buttons))
+                    foreach (var rec in _rawDevices.Values)
                     {
-                        buttons = ReadJoystickButtons(handle, ownerHwnd);
-                        cachedButtons[handle.InstanceGuidStr] = buttons;
-                    }
-
-                    if (buttons != null && bind.ButtonIndex < buttons.Length && buttons[bind.ButtonIndex])
-                    {
-                        pressedIds.Add(bind.Id);
+                        if (BindingMatchesDevice(rec, bind) && rec.PressedButtons.Contains(bind.ButtonIndex))
+                        {
+                            pressedIds.Add(bind.Id);
+                            break;
+                        }
                     }
                 }
             }
@@ -770,22 +1149,6 @@ namespace vPilotTabletMirror
             }
         }
 
-        private static DeviceHandle FindMatchingDevice(Dictionary<string, DeviceHandle> devices, PttBinding bind)
-        {
-            if (!string.IsNullOrEmpty(bind.InstanceGuid) && devices.TryGetValue(bind.InstanceGuid, out var exact))
-            {
-                return exact;
-            }
-
-            if (!string.IsNullOrEmpty(bind.ProductGuid))
-            {
-                return devices.Values.FirstOrDefault(d =>
-                    string.Equals(d.ProductGuidStr, bind.ProductGuid, StringComparison.OrdinalIgnoreCase));
-            }
-
-            return null;
-        }
-
         private static bool IsVirtualKeyDown(int vKey)
         {
             return (GetAsyncKeyState(vKey) & 0x8000) != 0;
@@ -793,7 +1156,6 @@ namespace vPilotTabletMirror
 
         private static IEnumerable<int> EnumerateCapturableVirtualKeys()
         {
-            // Skip mouse left (0x01), mouse right (0x02), middle (0x04), generic Shift/Ctrl/Alt (0x10-0x12) so L/R keys capture specifically
             for (int vk = 0x05; vk <= 0xFE; vk++)
             {
                 if (vk == 0x10 || vk == 0x11 || vk == 0x12 || vk == 0x1B) continue;
@@ -936,20 +1298,17 @@ namespace vPilotTabletMirror
 
         public void Dispose()
         {
-            try { _cts?.Cancel(); } catch { }
-            try { _wakeEvent.Set(); } catch { }
+            PostThreadMessage(WM_APP_EXIT);
             try
             {
-                if (_pollThread != null && _pollThread.IsAlive)
+                if (_uiThread != null && _uiThread.IsAlive)
                 {
-                    _pollThread.Join(500);
+                    _uiThread.Join(1000);
                 }
             }
             catch { }
-            _pollThread = null;
-            try { _cts?.Dispose(); } catch { }
-            _cts = null;
-            try { _wakeEvent.Dispose(); } catch { }
+            _uiThread = null;
+            try { _threadReady.Dispose(); } catch { }
         }
     }
 }
